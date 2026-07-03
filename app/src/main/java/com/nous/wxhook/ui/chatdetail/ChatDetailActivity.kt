@@ -1,5 +1,7 @@
 package com.nous.wxhook.ui.chatdetail
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -9,6 +11,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -18,6 +21,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 data class ChatMessage(
     val msgSvrId: Long, val type: Int,
@@ -31,15 +35,14 @@ class ChatDetailActivity : AppCompatActivity() {
     private lateinit var recyclerView: RecyclerView
     private var talker = ""
     private var nickname = ""
+    private val fileCache = ConcurrentHashMap<String, Boolean>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         talker = intent.getStringExtra("talker") ?: ""
         nickname = intent.getStringExtra("nickname") ?: talker
-        Log.i("wxhook:ChatDtl","onCreate talker=$talker nickname=$nickname")
-        recyclerView = RecyclerView(this).apply {
-            layoutManager = LinearLayoutManager(this@ChatDetailActivity)
-        }
+        Log.i("wxhook:ChatDtl","onCreate talker=$talker")
+        recyclerView = RecyclerView(this).apply { layoutManager = LinearLayoutManager(this@ChatDetailActivity) }
         setContentView(recyclerView)
         supportActionBar?.title = nickname
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
@@ -47,6 +50,44 @@ class ChatDetailActivity : AppCompatActivity() {
     }
 
     override fun onSupportNavigateUp(): Boolean { finish(); return true }
+
+    private fun execCmd(cmd: String): String {
+        return try {
+            val p = Runtime.getRuntime().exec(arrayOf("su","-c",cmd))
+            val out = p.inputStream.bufferedReader().readText().trim()
+            p.waitFor(); out
+        } catch (e: Exception) { "" }
+    }
+
+    private fun fileExists(wxPath: String): Boolean {
+        return fileCache.getOrPut(wxPath) { execCmd("test -f '$wxPath' && echo 1").contains("1") }
+    }
+
+    /** Resolve WeChat image/file path from imgPath column. */
+    private fun resolveWxPath(md5OrPath: String?, type: Int): String? {
+        if (md5OrPath.isNullOrBlank()) return null
+        // Extract md5 from THUMBNAIL_DIRPATH://th_{md5} or th_{md5}
+        val md5 = md5OrPath.substringAfter("th_").substringBefore("|").take(32)
+        if (md5.length < 32) return null
+        val wpid = execCmd("pidof com.tencent.mm")
+        if (wpid.isBlank()) return null
+        val base = "/proc/${wpid}/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
+        return when (type) {
+            3 -> "$base/image2/${md5.substring(0,2)}/${md5.substring(2,4)}/th_$md5"   // image thumbnail
+            34 -> "$base/voice2/${md5.substring(0,2)}/msg_$md5.amr"                    // voice
+            43 -> "$base/video/$md5"                                                    // video
+            else -> "$base/attachment/$md5"                                             // file attachment
+        }
+    }
+
+    /** Copy file from WeChat private dir to app cache and return local path. */
+    private fun copyToCache(wxPath: String): String? {
+        val name = wxPath.substringAfterLast("/")
+        val local = File(cacheDir, name)
+        if (local.exists()) return local.absolutePath
+        val r = execCmd("cp '$wxPath' '${local.absolutePath}' && echo ok")
+        return if (r.contains("ok")) local.absolutePath else null
+    }
 
     private fun loadMessages() {
         Thread {
@@ -62,38 +103,38 @@ class ChatDetailActivity : AppCompatActivity() {
                 val sc = "LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher"
                 val proc = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$dbPath' < '${sqlFile.absolutePath}'"))
                 val lines = proc.inputStream.bufferedReader().readLines()
-                val err = proc.errorStream.bufferedReader().readText().trim()
-                val exit = proc.waitFor(); sqlFile.delete()
+                proc.waitFor(); sqlFile.delete()
                 val cntProc = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$dbPath' < '${cntFile.absolutePath}'"))
                 val cntOut = cntProc.inputStream.bufferedReader().readText().trim(); cntProc.waitFor(); cntFile.delete()
                 val totalMsg = cntOut.lines().lastOrNull { it.all { c -> c.isDigit() } }?.toLongOrNull() ?: 0L
-                Log.i("wxhook:ChatDtl","exit=$exit lines=${lines.size} total=$totalMsg err=|$err|")
                 val msgs = mutableListOf<ChatMessage>()
                 for (line in lines) {
                     val p = line.split("|")
-                    if (p.size >= 6 && !p[0].startsWith("ok")) {
+                    if (p.size >= 6 && !p[0].startsWith("ok"))
                         msgs.add(ChatMessage(p[0].toLongOrNull()?:0L, p[1].toIntOrNull()?:0, p[2], p[3].toLongOrNull()?:0L, p[4]=="1", p.getOrNull(5)))
-                    }
                 }
-                Log.i("wxhook:ChatDtl","parsed ${msgs.size} messages")
+                Log.i("wxhook:ChatDtl","exit=0 lines=${lines.size} total=$totalMsg parsed=${msgs.size}")
                 handler.post {
                     if (msgs.isEmpty()) setContentView(TextView(this).apply { text = "没有消息"; textSize = 18f })
-                    else {
-                        supportActionBar?.subtitle = "共 $totalMsg 条"
-                        recyclerView.adapter = MessageAdapter(msgs)
-                    }
+                    else { supportActionBar?.subtitle = "共 $totalMsg 条"; recyclerView.adapter = MessageAdapter(msgs, fileCache, ::fileExists, ::resolveWxPath, ::copyToCache) }
                 }
             } catch (e: Exception) {
-                Log.e("wxhook:ChatDtl","query failed",e)
+                Log.e("wxhook:ChatDtl","failed",e)
                 handler.post { setContentView(TextView(this).apply { text = "查询失败: ${e.message}"; textSize = 14f }) }
             }
         }.start()
     }
 }
 
-// ── Adapter with type-aware display ──
+// ── Adapter with type-aware display + file status ──
 
-class MessageAdapter(private val items: List<ChatMessage>) : RecyclerView.Adapter<MessageAdapter.VH>() {
+class MessageAdapter(
+    private val items: List<ChatMessage>,
+    private val fileCache: MutableMap<String, Boolean>,
+    private val fileExists: (String) -> Boolean,
+    private val resolveWxPath: (String?, Int) -> String?,
+    private val copyToCache: (String) -> String?
+) : RecyclerView.Adapter<MessageAdapter.VH>() {
 
     class VH(val card: MaterialCardView) : RecyclerView.ViewHolder(card)
 
@@ -110,22 +151,15 @@ class MessageAdapter(private val items: List<ChatMessage>) : RecyclerView.Adapte
         val msg = items[pos]; val ctx = holder.card.context
         holder.card.removeAllViews()
 
-        val vert = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
+        val vert = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT) }
 
         // Top row: direction + type badge + time
         val top = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT) }
         val dir = if (msg.isSend) "→" else "←"
         val parsed = MessageParser.parse(msg.type, msg.content, 0)
         val typeTag = when (msg.type) {
-            1    -> "📝 文本"
-            3    -> "🖼 图片"
-            34   -> "🎵 语音"
-            43   -> "🎬 视频"
-            47   -> "😊 表情"
-            48   -> "📍 位置"
+            1    -> "📝 文本"; 3    -> "🖼 图片"; 34   -> "🎵 语音"
+            43   -> "🎬 视频"; 47   -> "😊 表情"; 48   -> "📍 位置"
             42   -> "👤 名片"
             49   -> when (parsed.subType) {
                 MessageParser.APP_LINK        -> "🔗 链接"
@@ -136,114 +170,129 @@ class MessageAdapter(private val items: List<ChatMessage>) : RecyclerView.Adapte
                 MessageParser.APP_LOCATION    -> "📍 实时位置"
                 else -> "📦 ${parsed.typeDesc}"
             }
-            10000 -> "ℹ️ 系统"
-            10002 -> "↩️ 撤回"
+            10000 -> "ℹ️ 系统"; 10002 -> "↩️ 撤回"
             else  -> "❓ 类型${msg.type}"
         }
-
         top.addView(TextView(ctx).apply {
-            text = "$dir $typeTag"; textSize = 12f
-            setTextColor(0xFF6200EE.toInt())
+            text = "$dir $typeTag"; textSize = 12f; setTextColor(0xFF6200EE.toInt())
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         })
         val timeStr = if (msg.createTime > 0L) SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(Date(msg.createTime)) else ""
-        top.addView(TextView(ctx).apply {
-            text = timeStr; textSize = 11f; setTextColor(0x8A000000.toInt()); gravity = Gravity.END
-        })
+        top.addView(TextView(ctx).apply { text = timeStr; textSize = 11f; setTextColor(0x8A000000.toInt()); gravity = Gravity.END })
         vert.addView(top)
 
-        // Content based on type
-        val contentText = buildContent(ctx, msg, parsed)
-        if (contentText != null) vert.addView(contentText)
+        // Content body
+        buildAndAddContent(vert, ctx, msg, parsed)
 
         holder.card.addView(vert)
     }
 
-    private fun buildContent(ctx: android.content.Context, msg: ChatMessage, parsed: com.nous.wxhook.db.MessageParser.ParsedMessage): TextView? {
-        val tv = TextView(ctx).apply {
-            textSize = 14f; setTextColor(0xDE000000.toInt())
-            setPadding(0, 8, 0, 0)
-        }
+    private fun buildAndAddContent(vert: LinearLayout, ctx: android.content.Context, msg: ChatMessage, parsed: MessageParser.ParsedMessage) {
+        val tv = TextView(ctx).apply { textSize = 14f; setTextColor(0xDE000000.toInt()); setPadding(0, 8, 0, 0) }
+        val ctx2 = ctx
+
         when (msg.type) {
-            1 -> { // text
-                tv.text = parsed.content ?: "(空)"
-            }
-            3 -> { // image
-                val path = msg.imgPath?.take(60) ?: ""
-                tv.text = if (path.isNotEmpty()) "[图片] $path" else "[图片]"
-                tv.setTextColor(0xFF6200EE.toInt())
-            }
-            34 -> { // voice
-                val extra = parsed.mediaPath?.let { "(${it}ms)" } ?: ""
-                tv.text = "[语音]$extra"
-                tv.setTextColor(0xFF6200EE.toInt())
-            }
-            43 -> { // video
-                tv.text = "[视频]"
-                tv.setTextColor(0xFF6200EE.toInt())
-            }
-            47 -> { // emoji
-                tv.text = "[表情] ${parsed.content?.take(100) ?: ""}"
-            }
-            48 -> { // location
-                tv.text = "[位置] ${parsed.content?.take(100) ?: ""}"
-                tv.setTextColor(0xFF6200EE.toInt())
-            }
-            42 -> { // business card
-                tv.text = "[名片] ${parsed.content?.take(100) ?: ""}"
-                tv.setTextColor(0xFF6200EE.toInt())
-            }
-            49 -> { // app message
-                when (parsed.subType) {
-                    MessageParser.APP_LINK -> {
-                        val title = parsed.title ?: ""
-                        val url = parsed.url?.take(80) ?: ""
-                        tv.text = buildString {
-                            if (title.isNotEmpty()) appendLine(title)
-                            if (url.isNotEmpty()) appendLine(url)
-                            append(parsed.content?.take(200) ?: "")
-                        }
-                        tv.setTextColor(0xFF6200EE.toInt())
-                    }
-                    MessageParser.APP_FILE -> {
-                        val name = parsed.fileName?.take(50) ?: ""
-                        tv.text = "[文件] $name"
-                        tv.setTextColor(0xFF6200EE.toInt())
-                    }
-                    MessageParser.APP_MINI_PROGRAM -> {
-                        tv.text = "[小程序] ${parsed.title?.take(50) ?: ""}"
-                        tv.setTextColor(0xFF6200EE.toInt())
-                    }
-                    MessageParser.APP_MERGE_FORWARD -> {
-                        tv.text = "[合并转发]"
-                        tv.setTextColor(0xFF6200EE.toInt())
-                    }
-                    else -> {
-                        tv.text = parsed.content?.take(500) ?: "(空)"
-                    }
+            1 -> tv.text = parsed.content ?: "(空)"
+            3 -> { // image — check file
+                val wxPath = resolveWxPath(msg.imgPath, 3)
+                val exists = wxPath != null && fileExists(wxPath)
+                tv.text = buildString {
+                    appendLine("[图片]")
+                    if (wxPath != null) appendLine("  路径: ${wxPath.takeLast(60)}")
+                    if (exists) appendLine("  ✅ 文件存在 (${fileSizeStr(wxPath!!)}) — 点此查看")
+                    else appendLine("  ⚠️ 图片文件已丢失 (仅CDN链接)")
+                }
+                tv.setTextColor(if (exists) 0xFF6200EE.toInt() else 0x8A000000.toInt())
+                if (exists) tv.setOnClickListener {
+                    val local = copyToCache(wxPath!!)
+                    if (local != null) openFile(ctx2, File(local))
+                    else Toast.makeText(ctx2, "复制失败", Toast.LENGTH_SHORT).show()
                 }
             }
-            10000 -> { // system
-                tv.text = parsed.content?.take(500) ?: ""
-                tv.setTextColor(0x8A000000.toInt())
-                tv.textSize = 12f
+            34 -> { // voice — check file
+                val wxPath = resolveWxPath(msg.imgPath, 34)
+                val exists = wxPath != null && fileExists(wxPath)
+                tv.text = buildString {
+                    val extra = parsed.mediaPath?.let { "(${it}ms)" } ?: ""
+                    appendLine("[语音] $extra")
+                    if (exists) appendLine("  ✅ 文件存在 — 点此播放") else appendLine("  ⚠️ 语音文件已丢失")
+                }
+                tv.setTextColor(if (exists) 0xFF6200EE.toInt() else 0x8A000000.toInt())
             }
-            10002 -> { // revoke
-                tv.text = "[对方撤回了一条消息]"
-                tv.setTextColor(0x8A000000.toInt())
+            43 -> { // video
+                val wxPath = resolveWxPath(msg.imgPath, 43)
+                val exists = wxPath != null && fileExists(wxPath)
+                tv.text = buildString {
+                    appendLine("[视频]")
+                    if (exists) appendLine("  ✅ 文件存在 — 点此查看") else appendLine("  ⚠️ 视频文件已丢失")
+                }
+                tv.setTextColor(if (exists) 0xFF6200EE.toInt() else 0x8A000000.toInt())
             }
-            50   -> { // sticker/unknown
-                tv.text = "[动画表情]"
-                tv.setTextColor(0xFF6200EE.toInt())
+            47 -> tv.text = "[表情] ${parsed.content?.take(100) ?: ""}"
+            48 -> { tv.text = "[位置] ${parsed.content?.take(100) ?: ""}"; tv.setTextColor(0xFF6200EE.toInt()) }
+            42 -> { tv.text = "[名片] ${parsed.content?.take(100) ?: ""}"; tv.setTextColor(0xFF6200EE.toInt()) }
+            49 -> { // app messages
+                when (parsed.subType) {
+                    MessageParser.APP_LINK -> {
+                        tv.text = buildString { parsed.title?.let { appendLine(it) }; parsed.url?.take(80)?.let { appendLine(it) }; append(parsed.content?.take(200) ?: "") }
+                        tv.setTextColor(0xFF6200EE.toInt())
+                        parsed.url?.takeUnless { it.isBlank() }?.let { url ->
+                            tv.setOnClickListener {
+                                try { ctx2.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                                catch (e: Exception) { Toast.makeText(ctx2, "无法打开链接", Toast.LENGTH_SHORT).show() }
+                            }
+                        }
+                    }
+                    MessageParser.APP_FILE -> {
+                        val name = parsed.fileName?.take(50) ?: "未知文件"
+                        tv.text = "[文件] $name"
+                        tv.setTextColor(0xFF6200EE.toInt())
+                        // Try to locate file in WeChat attachment dir
+                        val wxPath = resolveWxPath(msg.imgPath, 0)
+                        val exists = wxPath != null && fileExists(wxPath)
+                        if (exists) { tv.append("\n  ✅ 点此打开"); tv.setOnClickListener { openFile(ctx2, File(wxPath!!)) } }
+                        else tv.append("\n  ⚠️ 文件已丢失 (仅CDN链接)")
+                    }
+                    MessageParser.APP_MINI_PROGRAM -> tv.text = "[小程序] ${parsed.title?.take(50) ?: ""}"
+                    MessageParser.APP_MERGE_FORWARD -> tv.text = "[合并转发]"
+                    else -> tv.text = parsed.content?.take(500) ?: "(空)"
+                }
             }
-            else -> {
-                val raw = msg.content?.take(300) ?: ""
-                tv.text = if (raw.isNotEmpty()) raw else "(类型 ${msg.type} 暂未解析)"
-                tv.setTextColor(0x8A000000.toInt())
-            }
+            10000 -> { tv.text = parsed.content?.take(500) ?: ""; tv.setTextColor(0x8A000000.toInt()); tv.textSize = 12f }
+            10002 -> { tv.text = "[对方撤回了一条消息]"; tv.setTextColor(0x8A000000.toInt()) }
+            50   -> { tv.text = "[动画表情]"; tv.setTextColor(0xFF6200EE.toInt()) }
+            else -> { val r = msg.content?.take(300) ?: ""; tv.text = r.ifEmpty { "(类型${msg.type} 暂未解析)" }; tv.setTextColor(0x8A000000.toInt()) }
         }
-        // Remove empty lines at start
-        return if (tv.text.isNullOrBlank()) null else tv
+        if (tv.text.isNotBlank()) vert.addView(tv)
+    }
+
+    private fun fileSizeStr(path: String): String {
+        val r = try { Runtime.getRuntime().exec(arrayOf("su","-c","stat -c '%s' '$path'")).inputStream.bufferedReader().readText().trim() } catch (_: Exception) { "" }
+        val bytes = r.toLongOrNull() ?: return "?"
+        return when { bytes < 1024 -> "${bytes}B"; bytes < 1048576 -> "${bytes/1024}KB"; else -> "${bytes/1048576}MB" }
+    }
+
+    private fun openFile(ctx: android.content.Context, file: File) {
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.provider", file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, getMimeType(file.name))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            ctx.startActivity(intent)
+        } catch (e: Exception) { Toast.makeText(ctx, "无法打开: ${e.message}", Toast.LENGTH_SHORT).show() }
+    }
+
+    private fun getMimeType(name: String): String = when {
+        name.endsWith(".jpg") || name.endsWith(".jpeg") -> "image/jpeg"
+        name.endsWith(".png") -> "image/png"
+        name.endsWith(".gif") -> "image/gif"
+        name.endsWith(".mp4") -> "video/mp4"
+        name.endsWith(".amr") -> "audio/amr"
+        name.endsWith(".mp3") -> "audio/mpeg"
+        name.endsWith(".pdf") -> "application/pdf"
+        name.endsWith(".doc") || name.endsWith(".docx") -> "application/msword"
+        else -> "*/*"
     }
 
     override fun getItemCount() = items.size
