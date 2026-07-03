@@ -6,7 +6,7 @@ import android.util.Log
 import java.io.File
 
 /** SQLCipher CLI path inside Termux. */
-private const val SQLCIPHER = "/data/data/com.termux/files/usr/bin/sqlcipher"
+private const val SQLCIPHER = "/data/local/sqlcipher"
 
 /**
  * WeChat EnMicroMsg.db tools.

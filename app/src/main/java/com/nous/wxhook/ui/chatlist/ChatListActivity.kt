@@ -89,7 +89,7 @@ class ChatListActivity : AppCompatActivity() {
                     "LEFT JOIN rcontact r ON c.username = r.username " +
                     "ORDER BY c.conversationTime DESC LIMIT 200;")
 
-                val scPath = "/data/data/com.termux/files/usr/bin/sqlcipher"
+                val scPath = "/data/local/sqlcipher"
                 val cmd = "$scPath '$dbPath' < '${sqlFile.absolutePath}'"
                 val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
                 val lines = proc.inputStream.bufferedReader().readLines()
