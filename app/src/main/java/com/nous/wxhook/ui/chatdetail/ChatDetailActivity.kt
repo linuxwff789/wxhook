@@ -253,10 +253,10 @@ class MessageAdapter(
             if (encBytes.size < 20) return null
             // Verify wxgf magic
             if (encBytes[0] != 'w'.code.toByte() || encBytes[1] != 'x'.code.toByte()) return null
-            val jpegHdr = byteArrayOf(0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01)
+            val jpegHdr = byteArrayOf(-1, -40, -1, -32, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1)
             val key = ByteArray(16) { i -> (encBytes[4 + i].toInt() xor jpegHdr[i].toInt()).toByte() }
             val dec = ByteArray(encBytes.size - 4) { i -> (encBytes[4 + i].toInt() xor key[i % 16].toInt()).toByte() }
-            val eoi = dec.indexOfSlice(byteArrayOf(0xFF, 0xD9))
+            val eoi = dec.indexOfSlice(byteArrayOf(-1, -39))
             dstFile.writeBytes(if (eoi >= 0) dec.copyOf(eoi + 2) else dec)
             dstFile.absolutePath
         } catch (e: Exception) { null }
