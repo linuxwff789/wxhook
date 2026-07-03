@@ -72,7 +72,7 @@ ORDER BY createTime DESC LIMIT 100;"""
                 sqlFile.writeText(sql)
                 val proc = Runtime.getRuntime().exec(arrayOf(
                     "su", "-c",
-                    "LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib /data/local/sqlcipher '$dbPath' < '${sqlFile.absolutePath}' 2>/dev/null"
+                    "env LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib /data/local/sqlcipher '$dbPath' < '${sqlFile.absolutePath}' 2>/dev/null"
                 ))
                 val lines = proc.inputStream.bufferedReader().readLines()
                 proc.waitFor()
