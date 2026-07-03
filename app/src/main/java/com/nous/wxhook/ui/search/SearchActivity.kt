@@ -12,6 +12,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 class SearchActivity : Activity() {
 
@@ -49,43 +50,45 @@ class SearchActivity : Activity() {
                     .lines().find { it.startsWith("key=") }?.removePrefix("key=")
                 if (hex != null) key = hex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
             } catch (_: Exception) {}
-            if (key == null) { handler.post { resultText.text = "未捕获密钥" }
-                return@Thread }
+            if (key == null) { handler.post { resultText.text = "未捕获密钥" }; return@Thread }
 
             val dbPath = "/sdcard/Download/EnMicroMsg.db"
-            if (!File(dbPath).exists()) { handler.post { resultText.text = "数据库不存在" }
-                return@Thread }
+            if (!File(dbPath).exists()) { handler.post { resultText.text = "数据库不存在" }; return@Thread }
 
-            val timeFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
-            val sql = "PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT talker, type, content, createTime, isSend FROM message WHERE content LIKE '%$keyword%' ORDER BY createTime DESC LIMIT 100;"
-            val sqlFile = "/sdcard/Download/q.sql"
-            File(sqlFile).writeText(sql)
-            su("chmod 666 $sqlFile")
-            val output = su("/data/data/com.termux/files/usr/bin/sqlcipher $dbPath < $sqlFile 2>&1")
-            su("rm -f $sqlFile")
+            val sqlFile = "/data/data/com.nous.wxhook/cache/q_${UUID.randomUUID()}.sql"
+            try {
+                val timeFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                File(sqlFile).writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT talker, type, content, createTime, isSend FROM message WHERE content LIKE '%$keyword%' ORDER BY createTime DESC LIMIT 100;")
+                su("chmod 666 $sqlFile")
+                val output = su("/data/data/com.termux/files/usr/bin/sqlcipher $dbPath < $sqlFile 2>&1")
+                su("rm -f $sqlFile")
 
-            val sb = StringBuilder()
-            val lines = output.lines().filter { it.contains("|") }
-            if (lines.isEmpty()) {
-                sb.appendLine("未找到包含 \"$keyword\" 的消息")
-            } else {
-                sb.appendLine("找到 ${lines.size} 条结果\n")
-                for (line in lines) {
-                    val parts = line.split("|")
-                    if (parts.size >= 4) {
-                        val talker = parts[0].trim()
-                        val content = parts[2].trim()
-                        val timeMs = parts[3].trim().toLongOrNull() ?: 0
-                        val isSend = parts[4].trim() == "1"
-                        val time = timeFormat.format(Date(timeMs))
-                        val dir = if (isSend) "→" else "←"
-                        sb.appendLine("$time $dir [$talker]")
-                        sb.appendLine("  ${content.take(150)}")
-                        sb.appendLine()
+                val sb = StringBuilder()
+                val lines = output.lines().filter { it.contains("|") }
+                if (lines.isEmpty()) {
+                    sb.appendLine("未找到包含 \"$keyword\" 的消息")
+                } else {
+                    sb.appendLine("找到 ${lines.size} 条结果\n")
+                    for (line in lines) {
+                        val parts = line.split("|")
+                        if (parts.size >= 4) {
+                            val talker = parts[0].trim()
+                            val content = parts[2].trim()
+                            val timeMs = parts[3].trim().toLongOrNull() ?: 0
+                            val isSend = parts[4].trim() == "1"
+                            val time = timeFormat.format(Date(timeMs))
+                            val dir = if (isSend) "→" else "←"
+                            sb.appendLine("$time $dir [$talker]")
+                            sb.appendLine("  ${content.take(150)}")
+                            sb.appendLine()
+                        }
                     }
                 }
+                handler.post { resultText.text = sb.toString() }
+            } catch (e: Exception) {
+                su("rm -f $sqlFile")
+                handler.post { resultText.text = "错误: ${e.message}" }
             }
-            handler.post { resultText.text = sb.toString() }
         }.start()
     }
 }

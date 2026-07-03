@@ -11,6 +11,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 class ChatDetailActivity : Activity() {
 
@@ -21,12 +22,8 @@ class ChatDetailActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         talker = intent.getStringExtra("talker") ?: ""
-
         val scrollView = ScrollView(this)
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 48, 48, 48)
-        }
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 48, 48, 48) }
         layout.addView(TextView(this).apply { text = "聊天: $talker"; textSize = 20f })
         contentText = TextView(this).apply { text = "加载中..."; textSize = 12f; setPadding(0, 32, 0, 0) }
         layout.addView(contentText)
@@ -48,42 +45,43 @@ class ChatDetailActivity : Activity() {
                     .lines().find { it.startsWith("key=") }?.removePrefix("key=")
                 if (hex != null) key = hex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
             } catch (_: Exception) {}
-            if (key == null) { handler.post { contentText.text = "未捕获密钥" }
-                return@Thread }
+            if (key == null) { handler.post { contentText.text = "未捕获密钥" }; return@Thread }
 
             val dbPath = "/sdcard/Download/EnMicroMsg.db"
-            if (!File(dbPath).exists()) { handler.post { contentText.text = "数据库不存在" }
-                return@Thread }
+            if (!File(dbPath).exists()) { handler.post { contentText.text = "数据库不存在" }; return@Thread }
 
-            val timeFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
-            val sql = "PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT type, content, createTime, isSend FROM message WHERE talker='$talker' ORDER BY createTime DESC LIMIT 200;"
+            val sqlFile = "/data/data/com.nous.wxhook/cache/q_${UUID.randomUUID()}.sql"
+            try {
+                val timeFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                File(sqlFile).writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT type, content, createTime, isSend FROM message WHERE talker='$talker' ORDER BY createTime DESC LIMIT 200;")
+                su("chmod 666 $sqlFile")
+                val output = su("/data/data/com.termux/files/usr/bin/sqlcipher $dbPath < $sqlFile 2>&1")
+                su("rm -f $sqlFile")
 
-            val sqlFile = "/sdcard/Download/q.sql"
-            File(sqlFile).writeText(sql)
-            su("chmod 666 $sqlFile")
-            val output = su("/data/data/com.termux/files/usr/bin/sqlcipher $dbPath < $sqlFile 2>&1")
-            su("rm -f $sqlFile")
-
-            val sb = StringBuilder()
-            val lines = output.lines().filter { it.contains("|") }
-            sb.appendLine("共 ${lines.size} 条消息\n")
-            for (line in lines.reversed()) {
-                val parts = line.split("|")
-                if (parts.size >= 4) {
-                    val type = parts[0].trim().toIntOrNull() ?: 0
-                    val content = parts[1].trim()
-                    val timeMs = parts[2].trim().toLongOrNull() ?: 0
-                    val isSend = parts[3].trim() == "1"
-                    val time = timeFormat.format(Date(timeMs))
-                    val dir = if (isSend) "→" else "←"
-                    val typeDesc = when (type) { 1 -> "文本"; 3 -> "图片"; 34 -> "语音"; 43 -> "视频"; 49 -> "链接"; 10000 -> "系统"; else -> "type=$type" }
-                    sb.appendLine("$time $dir [$typeDesc]")
-                    sb.appendLine("  ${content.take(200)}")
-                    sb.appendLine()
+                val sb = StringBuilder()
+                val lines = output.lines().filter { it.contains("|") }
+                sb.appendLine("共 ${lines.size} 条消息\n")
+                for (line in lines.reversed()) {
+                    val parts = line.split("|")
+                    if (parts.size >= 4) {
+                        val type = parts[0].trim().toIntOrNull() ?: 0
+                        val content = parts[1].trim()
+                        val timeMs = parts[2].trim().toLongOrNull() ?: 0
+                        val isSend = parts[3].trim() == "1"
+                        val time = timeFormat.format(Date(timeMs))
+                        val dir = if (isSend) "→" else "←"
+                        val typeDesc = when (type) { 1 -> "文本"; 3 -> "图片"; 34 -> "语音"; 43 -> "视频"; 49 -> "链接"; 10000 -> "系统"; else -> "type=$type" }
+                        sb.appendLine("$time $dir [$typeDesc]")
+                        sb.appendLine("  ${content.take(200)}")
+                        sb.appendLine()
+                    }
                 }
+                if (lines.isEmpty()) sb.appendLine("无消息")
+                handler.post { contentText.text = sb.toString() }
+            } catch (e: Exception) {
+                su("rm -f $sqlFile")
+                handler.post { contentText.text = "错误: ${e.message}" }
             }
-            if (lines.isEmpty()) sb.appendLine("无消息")
-            handler.post { contentText.text = sb.toString() }
         }.start()
     }
 }
