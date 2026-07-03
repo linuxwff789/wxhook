@@ -52,8 +52,9 @@ class StatusActivity : Activity() {
                 for (dir in procDir.listFiles() ?: emptyArray()) {
                     if (dir.isDirectory && dir.name.all { it.isDigit() }) {
                         try {
-                            val cmdline = File(dir, "cmdline").readText()
-                            if (cmdline.contains("com.tencent.mm") && !cmdline.contains(":")) {
+                            val bytes = File(dir, "cmdline").readBytes()
+                            val cmdline = String(bytes).trim('\u0000')
+                            if (cmdline == "com.tencent.mm") {
                                 wechatPid = dir.name
                                 break
                             }
