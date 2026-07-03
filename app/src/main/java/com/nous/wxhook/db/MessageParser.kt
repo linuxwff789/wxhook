@@ -1,6 +1,7 @@
 package com.nous.wxhook.db
 
 import android.util.Log
+import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.StringReader
 
