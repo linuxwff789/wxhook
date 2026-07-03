@@ -2,13 +2,13 @@ package com.nous.wxhook.xposed.hook
 
 import android.content.ContentValues
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import de.robv.android.xposed.XposedBridge
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import net.sqlcipher.database.SQLiteDatabase
 
 object KeyCaptureHook {
 
@@ -77,6 +77,9 @@ object KeyCaptureHook {
 
     private fun decryptAndPush(ctx: Context, keyHex: String) {
         try {
+            // Load SQLCipher library
+            SQLiteDatabase.loadLibs(ctx)
+
             val dbPath = "/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3/EnMicroMsg.db"
             val dbFile = File(dbPath)
 
@@ -85,43 +88,42 @@ object KeyCaptureHook {
                 return
             }
 
-            XposedBridge.log("$TAG DB found: ${dbFile.length() / 1024 / 1024} MB, decrypting with key=$keyHex...")
+            XposedBridge.log("$TAG DB found: ${dbFile.length() / 1024 / 1024} MB, decrypting...")
 
-            // Open and decrypt
-            val sql = "PRAGMA key='$keyHex';" +
-                "PRAGMA cipher_compatibility=3;" +
-                "PRAGMA cipher_page_size=1024;" +
-                "PRAGMA kdf_iter=4000;" +
-                "PRAGMA cipher_use_hmac=OFF;"
-
-            val db = SQLiteDatabase.openDatabase(dbPath, null, SQLiteDatabase.OPEN_READONLY, null)
-
-            // Verify decryption
-            db.rawQuery(sql + "SELECT count(*) FROM sqlite_master", null).use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val tableCount = cursor.getInt(0)
-                    XposedBridge.log("$TAG Decrypted: $tableCount tables")
-                }
-            }
+            // Open with SQLCipher
+            val password = keyHex.toByteArray()
+            val db = SQLiteDatabase.openDatabase(dbPath, password, null,
+                SQLiteDatabase.OPEN_READONLY,
+                null,
+                object : net.sqlcipher.database.SQLiteDatabaseHook {
+                    override fun preKey(database: net.sqlcipher.database.SQLiteDatabase?) {}
+                    override fun postKey(database: net.sqlcipher.database.SQLiteDatabase?) {
+                        database?.rawExecSQL("PRAGMA cipher_compatibility = 3")
+                        database?.rawExecSQL("PRAGMA cipher_page_size = 1024")
+                        database?.rawExecSQL("PRAGMA kdf_iter = 4000")
+                        database?.rawExecSQL("PRAGMA cipher_use_hmac = OFF")
+                    }
+                })
 
             // Get stats
             val stats = mutableMapOf<String, Long>()
             for (table in listOf("message", "rconversation", "chatroom")) {
                 try {
-                    db.rawQuery("SELECT count(*) FROM $table", null).use { cursor ->
-                        if (cursor.moveToFirst()) stats[table] = cursor.getLong(0)
-                    }
+                    val cursor = db.rawQuery("SELECT count(*) FROM $table", null)
+                    if (cursor.moveToFirst()) stats[table] = cursor.getLong(0)
+                    cursor.close()
                 } catch (_: Exception) {}
             }
             db.close()
 
-            XposedBridge.log("$TAG Stats: $stats")
+            XposedBridge.log("$TAG Decrypted! Stats: $stats")
 
             // Push stats via ContentProvider
             pushStats(ctx, keyHex, stats)
 
         } catch (e: Throwable) {
             XposedBridge.log("$TAG decryptAndPush failed: ${e.message}")
+            e.printStackTrace()
         }
     }
 
