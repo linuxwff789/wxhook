@@ -52,7 +52,7 @@
         <provider
             android:name=".db.WxHookProvider"
             android:authorities="com.nous.wxhook.provider"
-            android:exported="false" />
+            android:exported="true" />
 
     </application>
 
