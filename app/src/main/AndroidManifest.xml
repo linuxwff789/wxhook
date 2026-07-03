@@ -54,6 +54,10 @@
             android:authorities="com.nous.wxhook.provider"
             android:exported="true" />
 
+        <service
+            android:name=".service.DecryptService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 
 </manifest>
