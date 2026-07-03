@@ -194,33 +194,35 @@ class MessageAdapter(
         Thread {
             try {
                 val md5 = msg.imgPath?.substringAfter("th_")?.substringBefore("|")?.take(32) ?: ""
-                if (md5.length < 32) { handler.post { tv.text = "  ⚠️ 无效图片路径"; tv.visibility = View.VISIBLE }; return@Thread }
+                if (md5.length < 32) { handlerPost(tv, "  ⚠️ 无效图片路径"); return@Thread }
 
                 val wpid = execCmd("pidof com.tencent.mm")
-                if (wpid.isBlank()) { handler.post { tv.text = "  ⚠️ 需微信运行中才能加载图片"; tv.visibility = View.VISIBLE }; return@Thread }
+                if (wpid.isBlank()) { handlerPost(tv, "  ⚠️ 需微信运行中才能加载图片"); return@Thread }
 
                 val base = "/proc/${wpid}/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
-                // Try thumbnail first, then fallback to hd, then original
-                val candidates = listOf(
-                    "$base/image2/${md5.substring(0,2)}/${md5.substring(2,4)}/th_$md5",
-                    "$base/image2/${md5.substring(0,2)}/${md5.substring(2,4)}/th_${md5}hd",
-                    "$base/image2/${md5.substring(0,2)}/${md5.substring(2,4)}/$md5.jpg"
-                )
+                val imgDir = "$base/image2/${md5.substring(0,2)}/${md5.substring(2,4)}"
+
+                // Priority: th_hd > th_ > decrypted .jpg
                 var localPath: String? = null
-                for (path in candidates) {
-                    if (execCmd("test -f '$path' && head -c 2 '$path' | xxd -p").contains("ffd8")) {
-                        localPath = copyToCache(path)
+                for ((name, isEnc) in listOf("th_${md5}hd" to false, "th_$md5" to false, "$md5.jpg" to true)) {
+                    val full = "$imgDir/$name"
+                    if (execCmd("test -f '$full' && echo 1").contains("1")) {
+                        val cacheName = if (isEnc) "dec_$md5.jpg" else name
+                        val cacheFile = File(cacheDir, cacheName)
+                        if (cacheFile.exists()) { localPath = cacheFile.absolutePath; break }
+                        if (isEnc) {
+                            // Decrypt wxgf
+                            localPath = decryptWxgf(full, cacheFile)
+                        } else {
+                            if (execCmd("cp '$full' '${cacheFile.absolutePath}' && echo ok").contains("ok"))
+                                localPath = cacheFile.absolutePath
+                        }
                         if (localPath != null) break
                     }
                 }
 
                 if (localPath == null) {
-                    // Check if encrypted file exists
-                    val encPath = candidates.lastOrNull { execCmd("test -f '$it' && echo 1").contains("1") }
-                    handler.post {
-                        tv.text = if (encPath != null) "  🔒 图片已加密（wxgf格式）" else "  ⚠️ 图片已丢失"
-                        tv.visibility = View.VISIBLE
-                    }
+                    handlerPost(tv, "  ⚠️ 图片已丢失")
                     return@Thread
                 }
 
@@ -229,15 +231,48 @@ class MessageAdapter(
                     if (bm != null) {
                         tv.visibility = View.GONE
                         iv.setImageBitmap(bm); iv.visibility = View.VISIBLE
-                        iv.setOnClickListener { openFile(ctx, localPath!!) }
+                        iv.setOnClickListener { openFile(ctx, localPath) }
                     } else {
-                        tv.text = "  ⚠️ 图片解码失败（文件损坏或格式不支持）"; tv.visibility = View.VISIBLE
+                        tv.text = "  ⚠️ 图片解码失败（文件损坏）"; tv.visibility = View.VISIBLE
                     }
                 }
             } catch (e: Exception) {
-                handler.post { tv.text = "  ⚠️ 图片加载异常: ${(e.message?:"").take(50)}"; tv.visibility = View.VISIBLE }
+                handlerPost(tv, "  ⚠️ 图片加载异常: ${(e.message?:"").take(50)}")
             }
         }.start()
+    }
+
+    /** Decrypt wxgf (encrypted WeChat image) to JPEG */
+    private fun decryptWxgf(srcPath: String, dstFile: File): String? {
+        return try {
+            // Copy encrypted file to temp location first
+            val tmpFile = File(cacheDir, "tmp_enc_${dstFile.name}")
+            if (!execCmd("cp '$srcPath' '${tmpFile.absolutePath}' && echo ok").contains("ok")) return null
+            val encBytes = tmpFile.readBytes()
+            tmpFile.delete()
+            if (encBytes.size < 20) return null
+            // Verify wxgf magic
+            if (encBytes[0] != 'w'.code.toByte() || encBytes[1] != 'x'.code.toByte()) return null
+            val jpegHdr = byteArrayOf(0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01)
+            val key = ByteArray(16) { i -> (encBytes[4 + i].toInt() xor jpegHdr[i].toInt()).toByte() }
+            val dec = ByteArray(encBytes.size - 4) { i -> (encBytes[4 + i].toInt() xor key[i % 16].toInt()).toByte() }
+            val eoi = dec.indexOfSlice(byteArrayOf(0xFF, 0xD9))
+            dstFile.writeBytes(if (eoi >= 0) dec.copyOf(eoi + 2) else dec)
+            dstFile.absolutePath
+        } catch (e: Exception) { null }
+    }
+
+    private fun handlerPost(tv: TextView, msg: String) {
+        handler.post { tv.text = msg; tv.visibility = View.VISIBLE }
+    }
+
+    private fun ByteArray.indexOfSlice(slice: ByteArray): Int {
+        for (i in 0..size - slice.size) {
+            var match = true
+            for (j in slice.indices) { if (this[i + j] != slice[j]) { match = false; break } }
+            if (match) return i
+        }
+        return -1
     }
 
     private fun addVideo(vert: LinearLayout, ctx: android.content.Context, msg: ChatMessage) {
