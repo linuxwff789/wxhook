@@ -235,7 +235,7 @@ class MessageAdapter(
                     }
                 }
             } catch (e: Exception) {
-                handler.post { tv.text = "  ⚠️ 图片加载异常: ${e.message.take(50)}"; tv.visibility = View.VISIBLE }
+                handler.post { tv.text = "  ⚠️ 图片加载异常: ${(e.message?:"").take(50)}"; tv.visibility = View.VISIBLE }
             }
         }.start()
     }
@@ -249,16 +249,19 @@ class MessageAdapter(
         Thread {
             try {
                 val md5 = msg.imgPath?.substringAfter("th_")?.substringBefore("|")?.take(32) ?: ""
-                if (md5.length < 32) { handler.post { tv.text = "  🎬 [视频]\n  ⚠️ 无效路径" }; return@Thread }
-                val wpid = execCmd("pidof com.tencent.mm")
-                if (wpid.isBlank()) { handler.post { tv.text = "  🎬 [视频]\n  ⚠️ 需微信运行"; return@Thread } }
-                val base = "/proc/${wpid}/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
-                val vPath = "$base/video/$md5"
-                val local = if (execCmd("test -f '$vPath' && echo 1").contains("1")) copyToCache(vPath) else null
+                var videoLocal: String? = null
+                if (md5.length >= 32) {
+                    val wpid2 = execCmd("pidof com.tencent.mm")
+                    if (wpid2.isNotBlank()) {
+                        val base2 = "/proc/${wpid2}/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
+                        val vPath = "$base2/video/$md5"
+                        if (execCmd("test -f '$vPath' && echo 1").contains("1")) videoLocal = copyToCache(vPath)
+                    }
+                }
                 handler.post {
-                    if (local != null) {
+                    if (videoLocal != null) {
                         tv.text = "  ▶️ [视频]  ${md5.take(16)}…\n  👆 点击播放"
-                        tv.setOnClickListener { openFile(ctx, local) }
+                        tv.setOnClickListener { openFile(ctx, videoLocal!!) }
                     } else { tv.text = "  🎬 [视频]\n  ⚠️ 视频文件已丢失" }
                 }
             } catch (_: Exception) { handler.post { tv.text = "  🎬 [视频]\n  ⚠️ 检查异常" } }
@@ -275,16 +278,19 @@ class MessageAdapter(
         Thread {
             try {
                 val md5 = msg.imgPath?.substringAfter("th_")?.substringBefore("|")?.take(32) ?: ""
-                if (md5.length < 32) { handler.post { tv.text = "  🎵 [语音]\n  ⚠️ 无文件"; return@Thread } }
-                val wpid = execCmd("pidof com.tencent.mm")
-                if (wpid.isBlank()) { handler.post { tv.text = "  🎵 [语音]\n  ⚠️ 需微信运行"; return@Thread } }
-                val base = "/proc/${wpid}/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
-                val vPath = "$base/voice2/${md5.substring(0,2)}/msg_$md5.amr"
-                val local = if (execCmd("test -f '$vPath' && echo 1").contains("1")) copyToCache(vPath) else null
+                var voiceLocal: String? = null
+                if (md5.length >= 32) {
+                    val wpid2 = execCmd("pidof com.tencent.mm")
+                    if (wpid2.isNotBlank()) {
+                        val base2 = "/proc/${wpid2}/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
+                        val vPath = "$base2/voice2/${md5.substring(0,2)}/msg_$md5.amr"
+                        if (execCmd("test -f '$vPath' && echo 1").contains("1")) voiceLocal = copyToCache(vPath)
+                    }
+                }
                 handler.post {
-                    if (local != null) {
+                    if (voiceLocal != null) {
                         tv.text = "  🎵 [语音] ${parsed.mediaPath?.let { "(${it}ms)" } ?: ""}\n  👆 点击播放"
-                        tv.setOnClickListener { openFile(ctx, local) }
+                        tv.setOnClickListener { openFile(ctx, voiceLocal!!) }
                     } else { tv.text = "  🎵 [语音]\n  ⚠️ 语音文件已丢失" }
                 }
             } catch (_: Exception) { handler.post { tv.text = "  🎵 [语音]\n  ⚠️ 检查异常" } }
