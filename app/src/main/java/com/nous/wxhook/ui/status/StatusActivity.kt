@@ -45,24 +45,21 @@ class StatusActivity : Activity() {
         val sb = StringBuilder()
         var lastKey: String? = null
 
-        // Read key from WeChat's shared_prefs via /proc/PID/root
+        // Source 1: ContentProvider (most reliable)
         try {
-            val pid = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
-                .inputStream.bufferedReader().readText().trim().split("\n").firstOrNull()
-            if (pid != null && pid.isNotEmpty()) {
-                val procPath = "/proc/$pid/root/data/data/com.tencent.mm/shared_prefs/wxhook_key.xml"
-                val content = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $procPath"))
-                    .inputStream.bufferedReader().readText()
-                val match = Regex("name=\"key\">([^<]+)<").find(content)
-                if (match != null) {
-                    // Convert hex bytes to ASCII
-                    val hex = match.groupValues[1]
-                    lastKey = hex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
-                }
+            val cursor = contentResolver.query(
+                android.net.Uri.parse("content://com.nous.wxhook.provider/key"),
+                null, null, null, null
+            )
+            if (cursor != null && cursor.moveToFirst()) {
+                val keyHex = cursor.getString(cursor.getColumnIndexOrThrow("key"))
+                // Convert hex bytes to ASCII
+                lastKey = keyHex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
+                cursor.close()
             }
         } catch (_: Exception) {}
 
-        // Fallback: read from wxhook shared_prefs
+        // Source 2: shared_prefs fallback
         if (lastKey == null) {
             try {
                 val prefs = getSharedPreferences("wxhook", MODE_PRIVATE)
@@ -70,10 +67,27 @@ class StatusActivity : Activity() {
             } catch (_: Exception) {}
         }
 
+        // Source 3: /proc/PID/root from WeChat
+        if (lastKey == null) {
+            try {
+                val pid = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
+                    .inputStream.bufferedReader().readText().trim().split("\n").firstOrNull()
+                if (pid != null && pid.isNotEmpty()) {
+                    val content = Runtime.getRuntime().exec(arrayOf("su", "-c",
+                        "cat /proc/$pid/root/data/data/com.tencent.mm/shared_prefs/wxhook_key.xml"))
+                        .inputStream.bufferedReader().readText()
+                    val match = Regex("name=\"key\">([^<]+)<").find(content)
+                    if (match != null) {
+                        lastKey = match.groupValues[1].chunked(2).map { it.toInt(16).toChar() }.joinToString("")
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
         sb.appendLine("=== XP 模块状态 ===")
         if (lastKey != null) {
             sb.appendLine("密钥: ✓ $lastKey")
-            // Save to shared_prefs for other pages
+            // Save for other pages
             getSharedPreferences("wxhook", MODE_PRIVATE).edit()
                 .putString("last_key", lastKey)
                 .putInt("last_key_len", lastKey.length)
