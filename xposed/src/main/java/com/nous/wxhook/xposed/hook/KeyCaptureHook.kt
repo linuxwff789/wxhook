@@ -12,114 +12,108 @@ object KeyCaptureHook {
 
     private const val TAG = "[wxhook:Key]"
     private const val KNOWN_KEY = "e9cd2ae"
-    private var capturedKey: String? = null
+    private var keyCaptured = false
 
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         val loader = lpparam.classLoader
 
-        // Strategy 1: Try to hook Database.setCipherKey (may fail with Tinker)
-        try {
-            val dbClass = XposedHelpers.findClass(
-                "com.tencent.wcdb.core.Database", loader
-            )
+        // Hook Application.attach — fires after class loader is ready
+        XposedBridge.hookAllMethods(
+            android.app.Application::class.java,
+            "attach",
+            object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val ctx = param.args[0] as? Context ?: return
 
-            var hooked = 0
-            for (method in dbClass.declaredMethods) {
-                if (method.name == "setCipherKey" && method.parameterTypes.size >= 2) {
-                    XposedBridge.hookMethod(method, object : XC_MethodHook() {
-                        override fun afterHookedMethod(param: MethodHookParam) {
-                            try {
-                                val keyBytes = param.args[0] as? ByteArray ?: return
-                                val keyHex = keyBytes.joinToString("") {
-                                    String.format("%02x", if (it < 0) it + 256 else it.toInt())
-                                }
+                    // Try to hook Database.setCipherKey using ctx.classLoader
+                    try {
+                        val dbClass = ctx.classLoader!!.loadClass("com.tencent.wcdb.core.Database")
 
-                                if (keyHex != capturedKey) {
-                                    capturedKey = keyHex
-                                    XposedBridge.log("$TAG key captured from hook: $keyHex (len=${keyBytes.size})")
-                                    broadcastKey(keyHex, keyBytes.size)
-                                }
-                            } catch (e: Throwable) {
-                                XposedBridge.log("$TAG key extraction error: ${e.message}")
+                        var hooked = 0
+                        for (m in dbClass.declaredMethods) {
+                            if (m.name == "setCipherKey") {
+                                val sig = m.parameterTypes.joinToString { it.simpleName }
+                                XposedBridge.hookMethod(m, object : XC_MethodHook() {
+                                    override fun beforeHookedMethod(param: MethodHookParam) {
+                                        if (keyCaptured) return
+                                        try {
+                                            val args = param.args
+                                            val keyHex = if (args.size >= 1 && args[0] is ByteArray) {
+                                                (args[0] as ByteArray).joinToString("") { "%02x".format(it) }
+                                            } else "null"
+                                            val pageSize = args.getOrNull(1)?.toString() ?: "?"
+                                            val version = args.getOrNull(2)?.toString() ?: "?"
+
+                                            saveKey(ctx, keyHex, pageSize, version)
+                                            keyCaptured = true
+                                        } catch (e: Throwable) {
+                                            XposedBridge.log("$TAG ERR ${e.message}")
+                                        }
+                                    }
+                                })
+                                hooked++
+                                XposedBridge.log("$TAG HOOK setCipherKey($sig)")
                             }
                         }
-                    })
-                    hooked++
+                        XposedBridge.log("$TAG hooks installed: $hooked overloads")
+
+                    } catch (e: Throwable) {
+                        // Tinker: class not found, use known key
+                        XposedBridge.log("$TAG Database class not found (Tinker), using known key")
+                        saveKey(ctx, KNOWN_KEY, "1024", "3")
+                    }
+
+                    // Also read from /data/local/tmp/.wechat_key if exists
+                    readKeyFromFile(ctx)
                 }
             }
-            XposedBridge.log("$TAG hooked setCipherKey ($hooked overloads)")
-        } catch (e: Throwable) {
-            // Strategy 2: Tinker environment - class not found, use known key
-            XposedBridge.log("$TAG Database class not found (Tinker), using known key")
-            capturedKey = KNOWN_KEY
-            broadcastKey(KNOWN_KEY, 7)
-        }
-
-        // Also try to read key from WeChat's shared prefs as backup
-        try {
-            readKeyFromWeChatPrefs(lpparam)
-        } catch (e: Throwable) {
-            // Ignore
-        }
+        )
     }
 
-    private fun readKeyFromWeChatPrefs(lpparam: XC_LoadPackage.LoadPackageParam) {
-        // Try to read auth_key from WeChat's shared preferences
+    private fun saveKey(ctx: Context, keyHex: String, pageSize: String, version: String) {
         try {
-            val context = XposedHelpers.callMethod(
-                XposedHelpers.callStaticMethod(
-                    XposedHelpers.findClass("android.app.ActivityThread", null),
-                    "currentActivityThread"
-                ),
-                "getApplication"
-            ) as Context
+            val now = java.text.SimpleDateFormat(
+                "yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA
+            ).format(System.currentTimeMillis())
 
-            // Check known key file
-            val keyFile = java.io.File("/data/local/tmp/.wechat_key")
-            if (keyFile.exists()) {
-                val key = keyFile.readText().trim()
-                if (key.isNotEmpty() && key != capturedKey) {
-                    capturedKey = key
-                    XposedBridge.log("$TAG key read from file: $key")
-                    broadcastKey(key, key.length / 2)
-                }
-            }
-        } catch (e: Throwable) {
-            // Ignore
-        }
-    }
-
-    private fun broadcastKey(keyHex: String, keyLen: Int) {
-        try {
-            val context = XposedHelpers.callMethod(
-                XposedHelpers.callStaticMethod(
-                    XposedHelpers.findClass("android.app.ActivityThread", null),
-                    "currentActivityThread"
-                ),
-                "getApplication"
-            ) as Context
-
-            // Save to shared preferences
-            val prefs = context.getSharedPreferences("wxhook", Context.MODE_PRIVATE)
+            // Save to wxhook SharedPreferences
+            val prefs = ctx.getSharedPreferences("wxhook", Context.MODE_PRIVATE)
             prefs.edit()
                 .putString("last_key", keyHex)
-                .putInt("last_key_len", keyLen)
+                .putInt("last_key_len", keyHex.length / 2)
                 .putLong("last_key_time", System.currentTimeMillis())
+                .putString("page_size", pageSize)
+                .putString("cipher_version", version)
                 .apply()
 
-            // Broadcast
-            val intent = Intent("com.nous.wxhook.KEY_CAPTURED").apply {
-                putExtra("key", keyHex)
-                putExtra("keyLen", keyLen)
-                putExtra("time", System.currentTimeMillis().toString())
-            }
-            context.sendBroadcast(intent)
+            // Also write to shared file
+            try {
+                java.io.File("/data/local/tmp/.wechat_key").writeText(
+                    "key=$keyHex\npageSize=$pageSize\nversion=$version\ntime=$now\n"
+                )
+            } catch (_: Throwable) {}
 
-            XposedBridge.log("$TAG key saved to shared_prefs: $keyHex")
+            XposedBridge.log("$TAG KEY_CAPTURED key=$keyHex pageSize=$pageSize version=$version")
         } catch (e: Throwable) {
-            XposedBridge.log("$TAG broadcast failed: ${e.message}")
+            XposedBridge.log("$TAG saveKey failed: ${e.message}")
         }
     }
 
-    fun getLastKey(): String? = capturedKey
+    private fun readKeyFromFile(ctx: Context) {
+        try {
+            val keyFile = java.io.File("/data/local/tmp/.wechat_key")
+            if (keyFile.exists()) {
+                val content = keyFile.readText()
+                val key = content.lines().find { it.startsWith("key=") }?.removePrefix("key=")
+                if (!key.isNullOrEmpty() && !keyCaptured) {
+                    saveKey(ctx, key, "1024", "3")
+                    keyCaptured = true
+                }
+            }
+        } catch (_: Throwable) {}
+    }
+
+    fun getLastKey(): String? {
+        return if (keyCaptured) KNOWN_KEY else null
+    }
 }
