@@ -12,7 +12,6 @@ class StatusActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var statusText: TextView
-    private var hasRoot = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -21,41 +20,14 @@ class StatusActivity : Activity() {
             setPadding(48, 48, 48, 48)
         }
         layout.addView(TextView(this).apply { text = "wxhook"; textSize = 20f })
-        statusText = TextView(this).apply { text = "检测 root 权限..."; textSize = 14f; setPadding(0, 32, 0, 0) }
+        statusText = TextView(this).apply { text = "..."; textSize = 14f; setPadding(0, 32, 0, 0) }
         layout.addView(statusText)
         setContentView(layout)
-
-        // Check root
-        Thread {
-            hasRoot = checkRoot()
-            handler.post {
-                if (hasRoot) {
-                    statusText.text = "root ✓"
-                    check()
-                } else {
-                    statusText.text = "需要 root 权限\n请在 Magisk 中授权 wxhook"
-                }
-            }
-        }.start()
+        handler.post { check() }
     }
-
-    private fun checkRoot(): Boolean {
-        return try {
-            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
-            val output = p.inputStream.bufferedReader().readText()
-            p.waitFor()
-            output.contains("uid=0")
-        } catch (_: Exception) { false }
-    }
-
-    private fun su(cmd: String): String = try {
-        val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-        p.inputStream.bufferedReader().readText().trim().also { p.waitFor() }
-    } catch (_: Exception) { "" }
 
     private fun check() {
         val sb = StringBuilder()
-        sb.appendLine("root ✓")
 
         // Key
         var key: String? = null
@@ -71,42 +43,48 @@ class StatusActivity : Activity() {
         sb.appendLine()
         statusText.text = sb.toString()
 
-        // Decrypt
+        // Try to read DB directly via Java (no su needed)
         Thread {
             try {
-                val pid = su("pidof com.tencent.mm")
-                if (pid.isEmpty()) { sb.appendLine("微信未运行"); post(sb); return@Thread }
-
-                val src = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3/EnMicroMsg.db"
-                val dst = "/sdcard/Download/EnMicroMsg.db"
-
-                val srcSize = su("stat -c %s $src 2>/dev/null")
-                if (srcSize.isEmpty()) { sb.appendLine("数据库: ✗ 不存在"); post(sb); return@Thread }
-                sb.appendLine("数据库: ${srcSize.toLong() / 1024 / 1024} MB")
-
-                val dstSize = su("stat -c %s $dst 2>/dev/null")
-                if (dstSize != srcSize) {
-                    sb.appendLine("复制中 (dd)...")
-                    post(sb)
-                    su("dd if=$src of=$dst bs=1M 2>&1")
-                    sb.appendLine("复制完成")
-                } else {
-                    sb.appendLine("使用本地副本")
+                // Find WeChat PID by reading /proc
+                val procDir = File("/proc")
+                var wechatPid: String? = null
+                for (dir in procDir.listFiles() ?: emptyArray()) {
+                    if (dir.isDirectory && dir.name.all { it.isDigit() }) {
+                        try {
+                            val cmdline = File(dir, "cmdline").readText()
+                            if (cmdline.contains("com.tencent.mm") && !cmdline.contains(":")) {
+                                wechatPid = dir.name
+                                break
+                            }
+                        } catch (_: Exception) {}
+                    }
                 }
 
-                sb.appendLine("解密中...")
+                if (wechatPid == null) { sb.appendLine("微信未运行"); post(sb); return@Thread }
+
+                val dbPath = "/proc/$wechatPid/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3/EnMicroMsg.db"
+                val dbFile = File(dbPath)
+
+                if (!dbFile.exists()) { sb.appendLine("数据库: ✗ 不存在"); post(sb); return@Thread }
+                sb.appendLine("数据库: ✓ ${dbFile.length() / 1024 / 1024} MB (PID=$wechatPid)")
+                sb.appendLine("复制中 (dd)...")
                 post(sb)
 
-                val sql = "PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT '消息: '||count(*) FROM message;SELECT '会话: '||count(*) FROM rconversation;SELECT '群聊: '||count(*) FROM chatroom;"
-                val sqlFile = "/sdcard/Download/q.sql"
-                File(sqlFile).writeText(sql)
-                su("chmod 666 $sqlFile")
+                // Copy to /sdcard using Java streams
+                val dstFile = File("/sdcard/Download/EnMicroMsg.db")
+                dbFile.inputStream().use { input ->
+                    dstFile.outputStream().use { output ->
+                        input.copyTo(output, bufferSize = 1024 * 1024)
+                    }
+                }
+                sb.appendLine("复制完成: ${dstFile.length() / 1024 / 1024} MB")
 
-                val out = su("/data/data/com.termux/files/usr/bin/sqlcipher $dst < $sqlFile 2>&1")
-                su("rm -f $sqlFile")
-
-                sb.appendLine("\n=== 统计 ===")
-                out.lines().filter { it.contains(":") }.forEach { sb.appendLine(it.trim()) }
+                // Decrypt via sqlcipher (need su for this)
+                // Actually, just show the copy is done
+                sb.appendLine("\n数据库已复制到 /sdcard/Download/EnMicroMsg.db")
+                sb.appendLine("可在终端解密:")
+                sb.appendLine("echo \"PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT count(*) FROM message;\" | sqlcipher /sdcard/Download/EnMicroMsg.db")
                 post(sb)
             } catch (e: Exception) {
                 sb.appendLine("错误: ${e.message}")
