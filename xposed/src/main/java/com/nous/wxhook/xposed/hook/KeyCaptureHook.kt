@@ -76,22 +76,35 @@ object KeyCaptureHook {
                 "yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA
             ).format(System.currentTimeMillis())
 
-            // Save to wxhook SharedPreferences
-            val prefs = ctx.getSharedPreferences("wxhook", Context.MODE_PRIVATE)
-            prefs.edit()
-                .putString("last_key", keyHex)
-                .putInt("last_key_len", keyHex.length / 2)
-                .putLong("last_key_time", System.currentTimeMillis())
-                .putString("page_size", pageSize)
-                .putString("cipher_version", version)
-                .apply()
-
-            // Also write to shared file
+            // Write to /data/local/tmp/.wechat_key (world-readable)
             try {
-                java.io.File("/data/local/tmp/.wechat_key").writeText(
+                val keyFile = java.io.File("/data/local/tmp/.wechat_key")
+                keyFile.writeText(
                     "key=$keyHex\npageSize=$pageSize\nversion=$version\ntime=$now\n"
                 )
-            } catch (_: Throwable) {}
+                // Make it world-readable
+                keyFile.setReadable(true, false)
+                keyFile.setWritable(true, false)
+                XposedBridge.log("$TAG wrote /data/local/tmp/.wechat_key")
+            } catch (e: Throwable) {
+                XposedBridge.log("$TAG write .wechat_key failed: ${e.message}")
+            }
+
+            // Also write to wxhook app's shared_prefs via shell
+            try {
+                val prefsDir = "/data/data/com.nous.wxhook/shared_prefs"
+                val prefsFile = "$prefsDir/wxhook.xml"
+                val xml = """<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <string name="last_key">$keyHex</string>
+    <int name="last_key_len" value="${keyHex.length / 2}" />
+    <long name="last_key_time" value="${System.currentTimeMillis()}" />
+</map>"""
+                Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $prefsDir && cat > $prefsFile << 'PREFS_EOF'\n$xml\nPREFS_EOF && chmod 660 $prefsFile && chown 10281:10281 $prefsFile && chown 10281:10281 $prefsDir")).waitFor()
+                XposedBridge.log("$TAG wrote wxhook shared_prefs")
+            } catch (e: Throwable) {
+                XposedBridge.log("$TAG write wxhook prefs failed: ${e.message}")
+            }
 
             XposedBridge.log("$TAG KEY_CAPTURED key=$keyHex pageSize=$pageSize version=$version")
         } catch (e: Throwable) {
