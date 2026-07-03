@@ -56,12 +56,14 @@ class ChatListActivity : Activity() {
             } catch (_: Exception) {}
 
             if (key == null) {
-                handler.post { contentText.text = "未捕获密钥"; return@Thread }
+                handler.post { contentText.text = "未捕获密钥" }
+                return@Thread
             }
 
             val dbPath = "/sdcard/Download/EnMicroMsg.db"
             if (!File(dbPath).exists()) {
-                handler.post { contentText.text = "数据库不存在，请先复制"; return@Thread }
+                handler.post { contentText.text = "数据库不存在，请先复制" }
+                return@Thread
             }
 
             // Query via sqlcipher CLI
