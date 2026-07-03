@@ -109,7 +109,7 @@ SELECT * FROM message;
 
             val insertCount = iorFile.readLines().count { it.startsWith("INSERT") }
             Log.i(TAG, "Dumped $insertCount INSERT OR IGNORE statements")
-            if (insertCount == 0L) {
+            if (insertCount == 0) {
                 return MergeResult(overlayCount, 0, overlayCount, emptyList(), outputPath)
             }
 
