@@ -12,6 +12,7 @@ class StatusActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var statusText: TextView
+    private var hasRoot = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -20,10 +21,31 @@ class StatusActivity : Activity() {
             setPadding(48, 48, 48, 48)
         }
         layout.addView(TextView(this).apply { text = "wxhook"; textSize = 20f })
-        statusText = TextView(this).apply { text = "..."; textSize = 14f; setPadding(0, 32, 0, 0) }
+        statusText = TextView(this).apply { text = "检测 root 权限..."; textSize = 14f; setPadding(0, 32, 0, 0) }
         layout.addView(statusText)
         setContentView(layout)
-        handler.post { check() }
+
+        // Check root
+        Thread {
+            hasRoot = checkRoot()
+            handler.post {
+                if (hasRoot) {
+                    statusText.text = "root ✓"
+                    check()
+                } else {
+                    statusText.text = "需要 root 权限\n请在 Magisk 中授权 wxhook"
+                }
+            }
+        }.start()
+    }
+
+    private fun checkRoot(): Boolean {
+        return try {
+            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+            val output = p.inputStream.bufferedReader().readText()
+            p.waitFor()
+            output.contains("uid=0")
+        } catch (_: Exception) { false }
     }
 
     private fun su(cmd: String): String = try {
@@ -33,6 +55,7 @@ class StatusActivity : Activity() {
 
     private fun check() {
         val sb = StringBuilder()
+        sb.appendLine("root ✓")
 
         // Key
         var key: String? = null
@@ -48,7 +71,7 @@ class StatusActivity : Activity() {
         sb.appendLine()
         statusText.text = sb.toString()
 
-        // Decrypt via dd + sqlcipher
+        // Decrypt
         Thread {
             try {
                 val pid = su("pidof com.tencent.mm")
@@ -63,7 +86,7 @@ class StatusActivity : Activity() {
 
                 val dstSize = su("stat -c %s $dst 2>/dev/null")
                 if (dstSize != srcSize) {
-                    sb.appendLine("复制中 (dd, ~5秒)...")
+                    sb.appendLine("复制中 (dd)...")
                     post(sb)
                     su("dd if=$src of=$dst bs=1M 2>&1")
                     sb.appendLine("复制完成")
