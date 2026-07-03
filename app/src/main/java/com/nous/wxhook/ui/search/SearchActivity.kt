@@ -8,8 +8,10 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.nous.wxhook.db.WeChatDbDecryptor
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class SearchActivity : Activity() {
 
@@ -26,11 +28,7 @@ class SearchActivity : Activity() {
             setPadding(48, 48, 48, 48)
         }
 
-        val title = TextView(this).apply {
-            text = "搜索消息"
-            textSize = 20f
-        }
-        layout.addView(title)
+        layout.addView(TextView(this).apply { text = "搜索消息"; textSize = 20f })
 
         searchText = EditText(this).apply {
             hint = "输入关键词..."
@@ -38,14 +36,13 @@ class SearchActivity : Activity() {
         }
         layout.addView(searchText)
 
-        val searchBtn = android.widget.Button(this).apply {
+        android.widget.Button(this).apply {
             text = "搜索"
             setOnClickListener { performSearch() }
-        }
-        layout.addView(searchBtn)
+        }.let { layout.addView(it) }
 
         resultText = TextView(this).apply {
-            textSize = 14f
+            textSize = 12f
             setPadding(0, 32, 0, 0)
         }
         layout.addView(resultText)
@@ -54,74 +51,65 @@ class SearchActivity : Activity() {
         setContentView(scrollView)
     }
 
+    private fun su(cmd: String): String = try {
+        val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+        p.inputStream.bufferedReader().readText().trim().also { p.waitFor() }
+    } catch (_: Exception) { "" }
+
     private fun performSearch() {
         val keyword = searchText.text.toString().trim()
-        if (keyword.isEmpty()) {
-            resultText.text = "请输入关键词"
-            return
-        }
+        if (keyword.isEmpty()) { resultText.text = "请输入关键词"; return }
 
         resultText.text = "搜索中..."
 
         Thread {
-            val prefs = getSharedPreferences("wxhook", MODE_PRIVATE)
-            val key = prefs.getString("last_key", null) ?: run {
-                handler.post { resultText.text = "未捕获密钥" }
-                return@Thread
-            }
-
-            val dbPath = "/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3/EnMicroMsg.db"
-            if (!File(dbPath).exists()) {
-                handler.post { resultText.text = "数据库文件不存在" }
-                return@Thread
-            }
-
+            var key: String? = null
             try {
-                val db = WeChatDbDecryptor.openDecryptedDb(dbPath) ?: run {
-                    handler.post { resultText.text = "解密失败" }
-                    return@Thread
+                val hex = File("/data/local/tmp/.wechat_key").readText()
+                    .lines().find { it.startsWith("key=") }?.removePrefix("key=")
+                if (hex != null) key = hex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
+            } catch (_: Exception) {}
+
+            if (key == null) { handler.post { resultText.text = "未捕获密钥"; return@Thread }
+
+            val dbPath = "/sdcard/Download/EnMicroMsg.db"
+            if (!File(dbPath).exists()) { handler.post { resultText.text = "数据库不存在"; return@Thread }
+
+            val timeFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+            val sql = "PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT talker, type, content, createTime, isSend FROM message WHERE content LIKE '%$keyword%' ORDER BY createTime DESC LIMIT 100;"
+
+            val sqlFile = "/sdcard/Download/q.sql"
+            File(sqlFile).writeText(sql)
+            su("chmod 666 $sqlFile")
+
+            val output = su("/data/data/com.termux/files/usr/bin/sqlcipher $dbPath < $sqlFile 2>&1")
+            su("rm -f $sqlFile")
+
+            val sb = StringBuilder()
+            val lines = output.lines().filter { it.contains("|") }
+
+            if (lines.isEmpty()) {
+                sb.appendLine("未找到包含 \"$keyword\" 的消息")
+            } else {
+                sb.appendLine("找到 ${lines.size} 条结果\n")
+                for (line in lines) {
+                    val parts = line.split("|")
+                    if (parts.size >= 4) {
+                        val talker = parts[0].trim()
+                        val content = parts[2].trim()
+                        val timeMs = parts[3].trim().toLongOrNull() ?: 0
+                        val isSend = parts[4].trim() == "1"
+
+                        val time = timeFormat.format(Date(timeMs))
+                        val dir = if (isSend) "→" else "←"
+                        sb.appendLine("$time $dir [$talker]")
+                        sb.appendLine("  ${content.take(150)}")
+                        sb.appendLine()
+                    }
                 }
-
-                val cursor = db.rawQuery(
-                    """SELECT talker, type, content, createTime, isSend 
-                       FROM message 
-                       WHERE content LIKE ? 
-                       ORDER BY createTime DESC 
-                       LIMIT 100""",
-                    arrayOf("%$keyword%")
-                )
-
-                val sb = StringBuilder()
-                var count = 0
-                while (cursor.moveToNext()) {
-                    count++
-                    val talker = cursor.getString(0)
-                    val type = cursor.getInt(1)
-                    val content = cursor.getString(2)
-                    val time = cursor.getLong(3)
-                    val isSend = cursor.getInt(4) == 1
-
-                    val timeStr = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
-                        .format(java.util.Date(time))
-                    val dir = if (isSend) "→" else "←"
-
-                    sb.appendLine("$timeStr $dir [$talker]")
-                    sb.appendLine("  ${content?.take(150) ?: "null"}")
-                    sb.appendLine()
-                }
-                cursor.close()
-                db.close()
-
-                if (count == 0) {
-                    sb.appendLine("未找到包含 \"$keyword\" 的消息")
-                } else {
-                    sb.insert(0, "找到 $count 条结果\n\n")
-                }
-
-                handler.post { resultText.text = sb.toString() }
-            } catch (e: Exception) {
-                handler.post { resultText.text = "搜索错误: ${e.message}" }
             }
+
+            handler.post { resultText.text = sb.toString() }
         }.start()
     }
 }

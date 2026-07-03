@@ -8,7 +8,6 @@ import android.os.Looper
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.nous.wxhook.db.WeChatDbDecryptor
 import com.nous.wxhook.ui.chatdetail.ChatDetailActivity
 import java.io.File
 
@@ -26,15 +25,11 @@ class ChatListActivity : Activity() {
             setPadding(48, 48, 48, 48)
         }
 
-        val title = TextView(this).apply {
-            text = "聊天列表"
-            textSize = 20f
-        }
-        layout.addView(title)
+        layout.addView(TextView(this).apply { text = "聊天列表"; textSize = 20f })
 
         contentText = TextView(this).apply {
             text = "加载中..."
-            textSize = 14f
+            textSize = 12f
             setPadding(0, 32, 0, 0)
         }
         layout.addView(contentText)
@@ -45,55 +40,62 @@ class ChatListActivity : Activity() {
         loadConversations()
     }
 
+    private fun su(cmd: String): String = try {
+        val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+        p.inputStream.bufferedReader().readText().trim().also { p.waitFor() }
+    } catch (_: Exception) { "" }
+
     private fun loadConversations() {
         Thread {
-            val prefs = getSharedPreferences("wxhook", MODE_PRIVATE)
-            val key = prefs.getString("last_key", null)
+            // Read key
+            var key: String? = null
+            try {
+                val hex = File("/data/local/tmp/.wechat_key").readText()
+                    .lines().find { it.startsWith("key=") }?.removePrefix("key=")
+                if (hex != null) key = hex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
+            } catch (_: Exception) {}
 
             if (key == null) {
-                handler.post { contentText.text = "未捕获密钥，请先重启微信" }
-                return@Thread
+                handler.post { contentText.text = "未捕获密钥"; return@Thread }
             }
 
-            val dbPath = "/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3/EnMicroMsg.db"
+            val dbPath = "/sdcard/Download/EnMicroMsg.db"
             if (!File(dbPath).exists()) {
-                handler.post { contentText.text = "数据库文件不存在" }
-                return@Thread
+                handler.post { contentText.text = "数据库不存在，请先复制"; return@Thread }
             }
 
-            try {
-                val db = WeChatDbDecryptor.openDecryptedDb(dbPath)
-                if (db == null) {
-                    handler.post { contentText.text = "数据库解密失败" }
-                    return@Thread
-                }
+            // Query via sqlcipher CLI
+            val sql = "PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT rconversation_username, rconversation_nickname, rconversation_unReadCount FROM rconversation ORDER BY rconversation_time DESC LIMIT 100;"
 
-                val conversations = WeChatDbDecryptor.queryConversations(db)
-                val contacts = WeChatDbDecryptor.queryContacts(db)
-                val contactMap = mutableMapOf<String, String>()
-                for (c in contacts) {
-                    val u = c["username"] as String
-                    val n = c["nickname"] as? String ?: "未知"
-                    contactMap[u] = n
-                }
+            val sqlFile = "/sdcard/Download/q.sql"
+            File(sqlFile).writeText(sql)
+            su("chmod 666 $sqlFile")
 
-                val sb = StringBuilder()
-                sb.appendLine("共 ${conversations.size} 个会话\n")
+            val output = su("/data/data/com.termux/files/usr/bin/sqlcipher $dbPath < $sqlFile 2>&1")
+            su("rm -f $sqlFile")
 
-                for (conv in conversations.take(100)) {
-                    val username = conv["username"] as String
-                    val displayName = contactMap[username] ?: username
-                    val unread = conv["unreadCount"] as Int
+            val sb = StringBuilder()
+            val lines = output.lines().filter { it.contains("|") }
 
-                    sb.appendLine("$displayName ($username)")
+            sb.appendLine("共 ${lines.size} 个会话\n")
+
+            for (line in lines) {
+                val parts = line.split("|")
+                if (parts.size >= 2) {
+                    val username = parts[0].trim()
+                    val nickname = parts[1].trim()
+                    val unread = parts.getOrNull(2)?.trim()?.toIntOrNull() ?: 0
+
+                    sb.appendLine("$nickname ($username)")
                     if (unread > 0) sb.appendLine("  未读: $unread")
                 }
-
-                db.close()
-                handler.post { contentText.text = sb.toString() }
-            } catch (e: Exception) {
-                handler.post { contentText.text = "错误: ${e.message}" }
             }
+
+            if (lines.isEmpty()) {
+                sb.appendLine("无会话数据")
+            }
+
+            handler.post { contentText.text = sb.toString() }
         }.start()
     }
 }
