@@ -60,15 +60,24 @@ class ChatDetailActivity : AppCompatActivity() {
                 }
                 val tag = System.currentTimeMillis().toString()
                 val sqlFile = File(cacheDir, "cd_${tag}.sql")
-                // Use hex(talker) to avoid SQL injection from special chars
-                sqlFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT msgSvrId,type,content,createTime,isSend FROM message WHERE talker='$talker' ORDER BY createTime DESC LIMIT 100;")
+                sqlFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT msgSvrId,type,content,createTime,isSend FROM message WHERE talker='$talker' ORDER BY createTime DESC LIMIT 5000;")
+                // Also get total count
+                val cntFile = File(cacheDir, "cd_cnt_${tag}.sql")
+                cntFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT count(*) FROM message WHERE talker='$talker';")
                 val sc = "LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher"
                 val proc = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$dbPath' < '${sqlFile.absolutePath}'"))
                 val lines = proc.inputStream.bufferedReader().readLines()
                 val err = proc.errorStream.bufferedReader().readText().trim()
                 val exit = proc.waitFor()
                 sqlFile.delete()
-                Log.i("wxhook:ChatDetail","exit=$exit lines=${lines.size} err=|$err|")
+
+                // Get total count
+                val cntProc = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$dbPath' < '${cntFile.absolutePath}'"))
+                val cntOut = cntProc.inputStream.bufferedReader().readText().trim()
+                cntProc.waitFor()
+                cntFile.delete()
+                val totalMsg = cntOut.lines().lastOrNull { it.all { c -> c.isDigit() } }?.toLongOrNull() ?: 0L
+                Log.i("wxhook:ChatDetail","exit=$exit lines=${lines.size} total=$totalMsg err=|$err|")
 
                 val msgs = mutableListOf<ChatMessage>()
                 for (line in lines) {
@@ -80,7 +89,10 @@ class ChatDetailActivity : AppCompatActivity() {
                 Log.i("wxhook:ChatDetail","parsed ${msgs.size} messages")
                 handler.post {
                     if (msgs.isEmpty()) setContentView(TextView(this).apply { text = "没有消息"; textSize = 18f })
-                    else recyclerView.adapter = MessageAdapter(msgs)
+                    else {
+                        supportActionBar?.subtitle = "共 $totalMsg 条，显示 ${msgs.size} 条"
+                        recyclerView.adapter = MessageAdapter(msgs)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("wxhook:ChatDetail","query failed",e)
