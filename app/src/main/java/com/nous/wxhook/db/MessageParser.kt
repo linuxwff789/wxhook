@@ -35,6 +35,8 @@ object MessageParser {
     const val APP_MINI_PROGRAM = 20
     const val APP_MUSIC = 24
     const val APP_MINI_CARD = 33
+    const val APP_TRANSFER = 2000   // 微信转账
+    const val APP_RED_PACKET = 2001 // 微信红包
 
     data class ParsedMessage(
         val type: Int,
@@ -184,42 +186,87 @@ object MessageParser {
             APP_MINI_PROGRAM -> "小程序"
             APP_MUSIC -> "音乐"
             APP_MINI_CARD -> "小程序卡片"
+            APP_TRANSFER -> "转账"
+            APP_RED_PACKET -> "红包"
             else -> "应用消息($subType)"
         }
 
         if (content == null) return ParsedMessage(TYPE_APP, typeDesc, null, subType)
 
-        // Parse title and URL from XML
-        var title: String? = null
-        var url: String? = null
-        var fileName: String? = null
+        var title = ""
+        var url = ""
+        var fileName = ""
+        var appMsgType = 0
+        var payAmount = ""
+        val sb = StringBuilder()
+
         try {
             val parser = XmlPullParserFactory.newInstance().newPullParser()
             parser.setInput(StringReader(content))
+            var currentTag = ""
             while (parser.eventType != XmlPullParser.END_DOCUMENT) {
                 when (parser.eventType) {
                     XmlPullParser.START_TAG -> {
-                        when (parser.name) {
-                            "appmsg" -> {
-                                title = parser.getAttributeValue(null, "title")
-                                url = parser.getAttributeValue(null, "url")
-                            }
-                            "appattach" -> {
-                                fileName = parser.getAttributeValue(null, "cdnattachurl")
-                            }
+                        currentTag = parser.name
+                        if (parser.name == "appmsg") {
+                            title = parser.getAttributeValue(null, "title") ?: ""
+                            url = parser.getAttributeValue(null, "url") ?: ""
                         }
+                        if (parser.name == "appattach") {
+                            fileName = parser.getAttributeValue(null, "cdnattachurl") ?: ""
+                        }
+                        if (parser.name == "wcpayinfo") {
+                            // Inside payment info
+                        }
+                    }
+                    XmlPullParser.TEXT -> {
+                        val text = parser.text?.trim() ?: ""
+                        when (currentTag) {
+                            "title" -> if (title.isEmpty()) title = text
+                            "url" -> if (url.isEmpty()) url = text
+                            "type" -> appMsgType = text.toIntOrNull() ?: 0
+                            "feedesc" -> payAmount = text           // 转账金额: ￥30.00
+                            "des" -> if (text.contains("转账") || text.contains("￥") || text.contains("¥")) payAmount = text
+                            "attachid" -> fileName = text
+                            "cdnattachurl" -> fileName = text
+                        }
+                    }
+                    XmlPullParser.END_TAG -> {
+                        if (parser.name == "title" || parser.name == "url" || parser.name == "type" || parser.name == "feedesc" || parser.name == "des") {
+                            currentTag = ""
+                        }
+                        currentTag = ""
                     }
                 }
                 parser.next()
             }
-        } catch (e: Exception) {}
+        } catch (_: Exception) {}
+
+        // Determine if it's a transfer or red packet
+        val detectedSubType = when {
+            appMsgType == 2000 || title.contains("转账") || payAmount.contains("￥") || payAmount.contains("¥") -> APP_TRANSFER
+            title.contains("红包") || title.contains("Red Packet") -> APP_RED_PACKET
+            else -> subType
+        }
+
+        // Extract amount from payAmount
+        val amount = when {
+            payAmount.contains("￥") || payAmount.contains("¥") -> payAmount.filter { it.isDigit() || it == '.' }
+            else -> ""
+        }
+
+        val finalTypeDesc = when (detectedSubType) {
+            APP_TRANSFER -> if (amount.isNotEmpty()) "转账 ¥$amount" else "转账"
+            APP_RED_PACKET -> "红包"
+            else -> typeDesc
+        }
 
         return ParsedMessage(
             type = TYPE_APP,
-            typeDesc = typeDesc,
+            typeDesc = finalTypeDesc,
             content = content,
-            subType = subType,
-            subTypeDesc = typeDesc,
+            subType = detectedSubType,
+            subTypeDesc = finalTypeDesc,
             title = title,
             url = url,
             fileName = fileName
