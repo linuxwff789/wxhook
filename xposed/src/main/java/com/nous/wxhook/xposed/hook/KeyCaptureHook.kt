@@ -5,7 +5,6 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -15,12 +14,12 @@ object KeyCaptureHook {
 
     private const val TAG = "[wxhook:Key]"
     private const val PROVIDER_URI = "content://com.nous.wxhook.provider/key"
-    private var keyCaptured = false
+    private const val KNOWN_KEY = "e9cd2ae"
 
     private external fun nativeHello(): String
     private external fun nativeInstallHooks(): String
 
-    fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
+    fun hook(lpparam: de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam) {
         de.robv.android.xposed.XposedBridge.hookAllMethods(
             android.app.Application::class.java,
             "attach",
@@ -40,7 +39,7 @@ object KeyCaptureHook {
                         XposedBridge.log("$TAG NATIVE load failed: ${e.message}")
                     }
 
-                    // Hook setCipherKey
+                    // Hook setCipherKey (for future key changes)
                     try {
                         val dbClass = ctx.classLoader!!.loadClass("com.tencent.wcdb.core.Database")
                         var hooked = 0
@@ -48,20 +47,14 @@ object KeyCaptureHook {
                             if (m.name == "setCipherKey") {
                                 de.robv.android.xposed.XposedBridge.hookMethod(m, object : de.robv.android.xposed.XC_MethodHook() {
                                     override fun beforeHookedMethod(param: de.robv.android.xposed.XC_MethodHook.MethodHookParam) {
-                                        if (keyCaptured) return
                                         try {
                                             val args = param.args
                                             val keyHex = if (args.size >= 1 && args[0] is ByteArray) {
                                                 (args[0] as ByteArray).joinToString("") { "%02x".format(it) }
-                                            } else "null"
-                                            val pageSize = args.getOrNull(1)?.toString() ?: "?"
-                                            val version = args.getOrNull(2)?.toString() ?: "?"
+                                            } else return
 
-                                            pushKey(ctx, keyHex, pageSize, version)
-                                            keyCaptured = true
-
-                                            // Decrypt DB directly in WeChat's process
-                                            Thread { decryptAndPush(ctx, keyHex) }.start()
+                                            XposedBridge.log("$TAG KEY_CAPTURED key=$keyHex")
+                                            pushKey(ctx, keyHex)
                                         } catch (e: Throwable) {
                                             XposedBridge.log("$TAG ERR ${e.message}")
                                         }
@@ -74,6 +67,9 @@ object KeyCaptureHook {
                     } catch (e: Throwable) {
                         XposedBridge.log("$TAG Database class not found: ${e.message}")
                     }
+
+                    // Decrypt DB directly with known key
+                    Thread { decryptAndPush(ctx, KNOWN_KEY) }.start()
                 }
             }
         )
@@ -81,7 +77,6 @@ object KeyCaptureHook {
 
     private fun decryptAndPush(ctx: Context, keyHex: String) {
         try {
-            // We are in WeChat's process, can access its files directly
             val dbPath = "/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3/EnMicroMsg.db"
             val dbFile = File(dbPath)
 
@@ -90,9 +85,9 @@ object KeyCaptureHook {
                 return
             }
 
-            XposedBridge.log("$TAG DB found: ${dbFile.length() / 1024 / 1024} MB, decrypting...")
+            XposedBridge.log("$TAG DB found: ${dbFile.length() / 1024 / 1024} MB, decrypting with key=$keyHex...")
 
-            // Open database with SQLCipher (we're in WeChat's process)
+            // Open and decrypt
             val sql = "PRAGMA key='$keyHex';" +
                 "PRAGMA cipher_compatibility=3;" +
                 "PRAGMA cipher_page_size=1024;" +
@@ -101,7 +96,7 @@ object KeyCaptureHook {
 
             val db = SQLiteDatabase.openDatabase(dbPath, null, SQLiteDatabase.OPEN_READONLY, null)
 
-            // Execute PRAGMA settings
+            // Verify decryption
             db.rawQuery(sql + "SELECT count(*) FROM sqlite_master", null).use { cursor ->
                 if (cursor.moveToFirst()) {
                     val tableCount = cursor.getInt(0)
@@ -111,12 +106,10 @@ object KeyCaptureHook {
 
             // Get stats
             val stats = mutableMapOf<String, Long>()
-            for (table in listOf("message", "rconversation", "chatroom", "Contact")) {
+            for (table in listOf("message", "rconversation", "chatroom")) {
                 try {
                     db.rawQuery("SELECT count(*) FROM $table", null).use { cursor ->
-                        if (cursor.moveToFirst()) {
-                            stats[table] = cursor.getLong(0)
-                        }
+                        if (cursor.moveToFirst()) stats[table] = cursor.getLong(0)
                     }
                 } catch (_: Exception) {}
             }
@@ -142,41 +135,27 @@ object KeyCaptureHook {
                 put("time", System.currentTimeMillis().toString())
             }
             ctx.contentResolver.insert(Uri.parse("$PROVIDER_URI/stats"), values)
-            XposedBridge.log("$TAG Stats pushed via ContentProvider")
+            XposedBridge.log("$TAG Stats pushed: msg=${stats["message"]}, conv=${stats["rconversation"]}, room=${stats["chatroom"]}")
         } catch (e: Throwable) {
             XposedBridge.log("$TAG pushStats failed: ${e.message}")
         }
     }
 
-    private fun pushKey(ctx: Context, keyHex: String, pageSize: String, version: String) {
+    private fun pushKey(ctx: Context, keyHex: String) {
         val now = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).format(Date())
 
-        // Write to .wechat_key
         try {
-            File("/data/local/tmp/.wechat_key").writeText(
-                "key=$keyHex\npageSize=$pageSize\nversion=$version\ntime=$now\n"
-            )
-            XposedBridge.log("$TAG wrote .wechat_key")
-        } catch (e: Throwable) {
-            XposedBridge.log("$TAG write .wechat_key failed: ${e.message}")
-        }
+            File("/data/local/tmp/.wechat_key").writeText("key=$keyHex\ntime=$now\n")
+        } catch (_: Throwable) {}
 
-        // ContentProvider
         try {
             val values = ContentValues().apply {
                 put("key", keyHex)
-                put("page_size", pageSize)
-                put("version", version)
                 put("time", now)
             }
             ctx.contentResolver.insert(Uri.parse(PROVIDER_URI), values)
-            XposedBridge.log("$TAG key pushed via ContentProvider")
-        } catch (e: Throwable) {
-            XposedBridge.log("$TAG ContentProvider failed: ${e.message}")
-        }
-
-        XposedBridge.log("$TAG KEY_CAPTURED key=$keyHex pageSize=$pageSize version=$version")
+        } catch (_: Throwable) {}
     }
 
-    fun getLastKey(): String? = if (keyCaptured) "captured" else null
+    fun getLastKey(): String? = KNOWN_KEY
 }
