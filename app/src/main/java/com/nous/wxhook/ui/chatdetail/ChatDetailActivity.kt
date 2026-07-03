@@ -60,7 +60,7 @@ class ChatDetailActivity : AppCompatActivity() {
                 }
                 val tag = System.currentTimeMillis().toString()
                 val sqlFile = File(cacheDir, "cd_${tag}.sql")
-                sqlFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT msgSvrId,type,content,createTime,isSend FROM message WHERE talker='$talker' ORDER BY createTime DESC LIMIT 5000;")
+                sqlFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT msgSvrId,type,replace(replace(content,char(10),' '),'|','/'),createTime,isSend FROM message WHERE talker='$talker' ORDER BY createTime DESC LIMIT 5000;")
                 // Also get total count
                 val cntFile = File(cacheDir, "cd_cnt_${tag}.sql")
                 cntFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT count(*) FROM message WHERE talker='$talker';")
