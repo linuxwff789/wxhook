@@ -101,7 +101,7 @@ class StatusActivity : Activity() {
         }
 
         sb.appendLine("\n=== 缓存状态 ===")
-        val cacheDb = File(databasePath, "wxhook.db")
+        val cacheDb = File(getDatabasePath("wxhook.db").parent, "wxhook.db")
         if (cacheDb.exists()) {
             sb.appendLine("本地缓存: ✓ (${cacheDb.length()} bytes)")
         } else {

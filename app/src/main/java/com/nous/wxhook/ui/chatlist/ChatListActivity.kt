@@ -70,7 +70,12 @@ class ChatListActivity : Activity() {
 
                 val conversations = WeChatDbDecryptor.queryConversations(db)
                 val contacts = WeChatDbDecryptor.queryContacts(db)
-                val contactMap = contacts.associate { it["username"] as String to it["nickname"] as? String ?: "未知" }
+                val contactMap = mutableMapOf<String, String>()
+                for (c in contacts) {
+                    val u = c["username"] as String
+                    val n = c["nickname"] as? String ?: "未知"
+                    contactMap[u] = n
+                }
 
                 val sb = StringBuilder()
                 sb.appendLine("共 ${conversations.size} 个会话\n")

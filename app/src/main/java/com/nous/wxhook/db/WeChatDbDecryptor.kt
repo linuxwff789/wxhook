@@ -108,7 +108,7 @@ object WeChatDbDecryptor {
                 "type" to cursor.getInt(3),
                 "subType" to cursor.getInt(4),
                 "content" to cursor.getString(5),
-                "isSend" to cursor.getInt(6) == 1,
+                "isSend" to (cursor.getInt(6) == 1),
                 "createTime" to cursor.getLong(7),
                 "talker" to cursor.getString(8),
                 "imgPath" to cursor.getString(9)
