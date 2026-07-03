@@ -409,14 +409,15 @@ class MessageAdapter(
         val tv = TextView(ctx).apply { textSize = 14f; setTextColor(0xDE000000.toInt()); setPadding(0, 8, 0, 0) }
         when (msg.type) {
             1 -> {
-                // Check if this is a group message by checking talker ends with @chatroom
                 val raw = parsed.content ?: "(空)"
-                if (talker.contains("@chatroom") && raw.contains(":\")) {
-                    val idx = raw.indexOf(":\")
+                if (talker.contains("@chatroom") && raw.contains(": ")) {
+                    val idx = raw.indexOf(": ")
                     val sender = raw.substring(0, idx)
                     val msg = raw.substring(idx + 2).trim()
                     val nick = getNickName(sender)
-                    tv.text = "\n[$nick]\n$msg"
+                    tv.text = "
+[$nick]
+$msg"
                 } else {
                     tv.text = raw
                 }
