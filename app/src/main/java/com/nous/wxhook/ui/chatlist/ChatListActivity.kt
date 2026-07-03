@@ -64,48 +64,39 @@ class ChatListActivity : AppCompatActivity() {
             try {
                 val key = "e9cd2ae"
                 val dbPath = "/sdcard/Download/EnMicroMsg.db"
-
                 val dbFile = File(dbPath)
                 if (!dbFile.exists()) {
                     Log.e("wxhook:ChatList", "DB not found")
-                    handler.post { Toast.makeText(this, "数据库不存在", Toast.LENGTH_LONG).show() }
-                    handler.post { progressBar.visibility = View.GONE }
+                    handler.post {
+                        progressBar.visibility = View.GONE
+                        val tv = TextView(this).apply { text = "数据库不存在"; textSize = 18f }
+                        setContentView(tv)
+                    }
                     return@Thread
                 }
 
                 val tag = System.currentTimeMillis().toString()
-                val scriptFile = File("/data/local/tmp/cl_${tag}.sh")
-                val outFile = File("/data/local/tmp/cl_out_${tag}.txt")
-                val sc = "/data/data/com.termux/files/usr/bin/sqlcipher"
+                val sqlFile = File(cacheDir, "cl_sql_${tag}.sql")
 
-                val script = "#!/system/bin/sh\n" +
-                    "printf 'PRAGMA key=\"$key\";\\n" +
-                    "PRAGMA cipher_compatibility=3;\\n" +
-                    "PRAGMA cipher_page_size=1024;\\n" +
-                    "PRAGMA kdf_iter=4000;\\n" +
-                    "PRAGMA cipher_use_hmac=OFF;\\n" +
-                    "SELECT c.username, IFNULL(r.nickname, c.username) AS nickname, c.unReadCount, c.conversationTime\\n" +
-                    "FROM rconversation c\\n" +
-                    "LEFT JOIN rcontact r ON c.username = r.username\\n" +
-                    "ORDER BY c.conversationTime DESC LIMIT 200;\\n' | " +
-                    "$sc $dbPath 2>/dev/null > " + outFile.absolutePath + "\n"
-                scriptFile.writeText(script)
-                Log.i("wxhook:ChatList", "wrote script to $scriptFile")
+                sqlFile.writeText("PRAGMA key='$key';" +
+                    "PRAGMA cipher_compatibility=3;" +
+                    "PRAGMA cipher_page_size=1024;" +
+                    "PRAGMA kdf_iter=4000;" +
+                    "PRAGMA cipher_use_hmac=OFF;" +
+                    "SELECT c.username, IFNULL(r.nickname, c.username) AS nickname, " +
+                    "c.unReadCount, c.conversationTime " +
+                    "FROM rconversation c " +
+                    "LEFT JOIN rcontact r ON c.username = r.username " +
+                    "ORDER BY c.conversationTime DESC LIMIT 200;")
 
-                val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "sh ${scriptFile.absolutePath}"))
-                proc.waitFor()
-                Log.i("wxhook:ChatList", "script exit=${proc.exitValue()}")
-
-                val lines = if (outFile.exists()) {
-                    outFile.readLines()
-                } else {
-                    Log.e("wxhook:ChatList", "outFile not found")
-                    emptyList()
-                }
-                scriptFile.delete()
-                outFile.delete()
-
-                Log.i("wxhook:ChatList", "got ${lines.size} lines")
+                val scPath = "/data/data/com.termux/files/usr/bin/sqlcipher"
+                val cmd = "$scPath '$dbPath' < '${sqlFile.absolutePath}'"
+                val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+                val lines = proc.inputStream.bufferedReader().readLines()
+                val err = proc.errorStream.bufferedReader().readText().trim()
+                val exit = proc.waitFor()
+                sqlFile.delete()
+                Log.i("wxhook:ChatList", "exit=$exit lines=${lines.size} err=|$err|")
 
                 val convs = mutableListOf<ChatConversation>()
                 for (line in lines) {
@@ -140,13 +131,14 @@ class ChatListActivity : AppCompatActivity() {
                 Log.e("wxhook:ChatList", "query failed", e)
                 handler.post {
                     progressBar.visibility = View.GONE
-                    val tv = TextView(this).apply { text = "查询失败: ${e.message}"; textSize = 18f }
+                    val tv = TextView(this).apply { text = "查询失败: ${e.message}\n${e.stackTraceToString().take(500)}"; textSize = 14f }
                     setContentView(tv)
                 }
             }
         }.start()
     }
 }
+// end of ChatListActivity
 
 class ChatAdapter(
     private val items: List<ChatConversation>,
@@ -184,7 +176,6 @@ class ChatAdapter(
             textSize = 16f
             setTextColor(0xDE000000.toInt())
         }
-
         val badgeView = TextView(ctx).apply {
             id = View.generateViewId()
             text = if (item.unReadCount > 0) "${item.unReadCount}" else ""
@@ -193,7 +184,6 @@ class ChatAdapter(
             setBackgroundColor(0xFFFF4444.toInt())
             setPadding(12, 4, 12, 4)
         }
-
         val timeView = TextView(ctx).apply {
             id = View.generateViewId()
             val sdf = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
@@ -206,7 +196,6 @@ class ChatAdapter(
         layout.addView(badgeView)
         layout.addView(timeView)
         holder.card.addView(layout)
-
         holder.card.setOnClickListener { onClick(item) }
     }
 
