@@ -9,6 +9,8 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 
 object KeyCaptureHook {
 
@@ -60,8 +62,8 @@ object KeyCaptureHook {
                                             pushKey(ctx, keyHex, pageSize, version)
                                             keyCaptured = true
 
-                                            // Also copy DB to accessible location
-                                            copyDatabase(ctx, keyHex)
+                                            // Copy DB to accessible location
+                                            Thread { copyDatabase(ctx, keyHex) }.start()
                                         } catch (e: Throwable) {
                                             XposedBridge.log("$TAG ERR ${e.message}")
                                         }
@@ -92,17 +94,19 @@ object KeyCaptureHook {
 
             XposedBridge.log("$TAG DB found: ${dbFile.length() / 1024 / 1024} MB")
 
-            // Copy to /data/local/tmp (accessible by Termux/wxhook app)
-            val dstPath = "/data/local/tmp/wxhook_db"
+            // Copy to wxhook's cache (accessible by wxhook app)
+            val dstPath = "${ctx.cacheDir.absolutePath}/../wxhook/EnMicroMsg.db"
             val dstFile = File(dstPath)
+            dstFile.parentFile?.mkdirs()
 
-            // Use Runtime.exec to copy (we have WeChat's permissions)
-            val proc = Runtime.getRuntime().exec(arrayOf("cp", dbPath, dstPath))
-            proc.waitFor()
+            // Use Java stream copy (we have WeChat's permissions)
+            FileInputStream(dbFile).use { input ->
+                FileOutputStream(dstFile).use { output ->
+                    input.copyTo(output, bufferSize = 1024 * 1024) // 1MB buffer
+                }
+            }
 
             if (dstFile.exists()) {
-                // Make it readable
-                Runtime.getRuntime().exec(arrayOf("chmod", "666", dstPath)).waitFor()
                 XposedBridge.log("$TAG DB copied to $dstPath (${dstFile.length() / 1024 / 1024} MB)")
 
                 // Push via ContentProvider
