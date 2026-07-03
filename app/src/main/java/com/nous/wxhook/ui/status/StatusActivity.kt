@@ -45,42 +45,40 @@ class StatusActivity : Activity() {
         val sb = StringBuilder()
         var lastKey: String? = null
 
-        // Source 1: ContentProvider (most reliable)
+        // Source 1: /data/local/tmp/.wechat_key (XP module writes here)
         try {
-            val cursor = contentResolver.query(
-                android.net.Uri.parse("content://com.nous.wxhook.provider/key"),
-                null, null, null, null
-            )
-            if (cursor != null && cursor.moveToFirst()) {
-                val keyHex = cursor.getString(cursor.getColumnIndexOrThrow("key"))
-                // Convert hex bytes to ASCII
-                lastKey = keyHex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
-                cursor.close()
+            val keyFile = File("/data/local/tmp/.wechat_key")
+            if (keyFile.exists()) {
+                val content = keyFile.readText()
+                val keyLine = content.lines().find { it.startsWith("key=") }
+                if (keyLine != null) {
+                    val hex = keyLine.removePrefix("key=")
+                    // Convert hex bytes to ASCII
+                    lastKey = hex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
+                }
             }
         } catch (_: Exception) {}
 
-        // Source 2: shared_prefs fallback
+        // Source 2: ContentProvider
+        if (lastKey == null) {
+            try {
+                val cursor = contentResolver.query(
+                    android.net.Uri.parse("content://com.nous.wxhook.provider/key"),
+                    null, null, null, null
+                )
+                if (cursor != null && cursor.moveToFirst()) {
+                    val keyHex = cursor.getString(cursor.getColumnIndexOrThrow("key"))
+                    lastKey = keyHex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
+                    cursor.close()
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Source 3: shared_prefs fallback
         if (lastKey == null) {
             try {
                 val prefs = getSharedPreferences("wxhook", MODE_PRIVATE)
                 lastKey = prefs.getString("last_key", null)
-            } catch (_: Exception) {}
-        }
-
-        // Source 3: /proc/PID/root from WeChat
-        if (lastKey == null) {
-            try {
-                val pid = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
-                    .inputStream.bufferedReader().readText().trim().split("\n").firstOrNull()
-                if (pid != null && pid.isNotEmpty()) {
-                    val content = Runtime.getRuntime().exec(arrayOf("su", "-c",
-                        "cat /proc/$pid/root/data/data/com.tencent.mm/shared_prefs/wxhook_key.xml"))
-                        .inputStream.bufferedReader().readText()
-                    val match = Regex("name=\"key\">([^<]+)<").find(content)
-                    if (match != null) {
-                        lastKey = match.groupValues[1].chunked(2).map { it.toInt(16).toChar() }.joinToString("")
-                    }
-                }
             } catch (_: Exception) {}
         }
 
