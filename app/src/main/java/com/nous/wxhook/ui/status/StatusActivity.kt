@@ -45,7 +45,7 @@ class StatusActivity : Activity() {
         val sb = StringBuilder()
         var lastKey: String? = null
 
-        // Source 1: /data/local/tmp/.wechat_key (XP module writes here)
+        // Read key from .wechat_key file
         try {
             val keyFile = File("/data/local/tmp/.wechat_key")
             if (keyFile.exists()) {
@@ -53,28 +53,12 @@ class StatusActivity : Activity() {
                 val keyLine = content.lines().find { it.startsWith("key=") }
                 if (keyLine != null) {
                     val hex = keyLine.removePrefix("key=")
-                    // Convert hex bytes to ASCII
                     lastKey = hex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
                 }
             }
         } catch (_: Exception) {}
 
-        // Source 2: ContentProvider
-        if (lastKey == null) {
-            try {
-                val cursor = contentResolver.query(
-                    android.net.Uri.parse("content://com.nous.wxhook.provider/key"),
-                    null, null, null, null
-                )
-                if (cursor != null && cursor.moveToFirst()) {
-                    val keyHex = cursor.getString(cursor.getColumnIndexOrThrow("key"))
-                    lastKey = keyHex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
-                    cursor.close()
-                }
-            } catch (_: Exception) {}
-        }
-
-        // Source 3: shared_prefs fallback
+        // Fallback: shared_prefs
         if (lastKey == null) {
             try {
                 val prefs = getSharedPreferences("wxhook", MODE_PRIVATE)
@@ -85,7 +69,6 @@ class StatusActivity : Activity() {
         sb.appendLine("=== XP 模块状态 ===")
         if (lastKey != null) {
             sb.appendLine("密钥: ✓ $lastKey")
-            // Save for other pages
             getSharedPreferences("wxhook", MODE_PRIVATE).edit()
                 .putString("last_key", lastKey)
                 .putInt("last_key_len", lastKey.length)
@@ -93,37 +76,68 @@ class StatusActivity : Activity() {
                 .apply()
         } else {
             sb.appendLine("密钥: ✗ 未捕获")
+            statusText.text = sb.toString()
+            return
         }
 
         sb.appendLine("\n=== 数据库状态 ===")
-        val dbPath = "/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3/EnMicroMsg.db"
-        val dbFile = File(dbPath)
-        if (dbFile.exists()) {
-            sb.appendLine("数据库: ✓ 存在 (${dbFile.length() / 1024 / 1024} MB)")
-            if (lastKey != null) {
+
+        // Find DB path via /proc/PID/root
+        Thread {
+            try {
+                val pid = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
+                    .inputStream.bufferedReader().readText().trim().split("\n").firstOrNull()
+
+                if (pid == null || pid.isEmpty()) {
+                    handler.post { sb.appendLine("微信未运行"); statusText.text = sb.toString() }
+                    return@Thread
+                }
+
+                val dbPath = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3/EnMicroMsg.db"
+
+                // Check if DB exists via root
+                val checkProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls -la $dbPath"))
+                val checkOutput = checkProc.inputStream.bufferedReader().readText()
+                checkProc.waitFor()
+
+                if (!checkOutput.contains("EnMicroMsg.db")) {
+                    handler.post { sb.appendLine("数据库: ✗ 不存在"); statusText.text = sb.toString() }
+                    return@Thread
+                }
+
+                // Copy DB to accessible location for decryption
+                val localDb = File(cacheDir, "EnMicroMsg.db")
+                sb.appendLine("数据库: ✓ 存在 (通过 /proc/$pid/root 访问)")
+                sb.appendLine("复制数据库到本地...")
+
+                val copyProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cp $dbPath ${localDb.absolutePath} && chmod 644 ${localDb.absolutePath}"))
+                copyProc.waitFor()
+
+                if (!localDb.exists() || localDb.length() == 0L) {
+                    handler.post { sb.appendLine("复制失败"); statusText.text = sb.toString() }
+                    return@Thread
+                }
+
+                sb.appendLine("本地副本: ${localDb.length() / 1024 / 1024} MB")
                 sb.appendLine("尝试解密...")
-                Thread {
-                    try {
-                        val db = WeChatDbDecryptor.openDecryptedDb(dbPath)
-                        if (db != null) {
-                            val stats = WeChatDbDecryptor.getStats(db)
-                            handler.post {
-                                sb.appendLine("\n=== 解密统计 ===")
-                                stats.forEach { (table, count) -> sb.appendLine("$table: $count 条") }
-                                statusText.text = sb.toString()
-                            }
-                            db.close()
-                        } else {
-                            handler.post { sb.appendLine("解密失败"); statusText.text = sb.toString() }
-                        }
-                    } catch (e: Exception) {
-                        handler.post { sb.appendLine("解密错误: ${e.message}"); statusText.text = sb.toString() }
-                    }
-                }.start()
+
+                val db = WeChatDbDecryptor.openDecryptedDb(localDb.absolutePath)
+                if (db != null) {
+                    val stats = WeChatDbDecryptor.getStats(db)
+                    sb.appendLine("\n=== 解密统计 ===")
+                    stats.forEach { (table, count) -> sb.appendLine("$table: $count 条") }
+                    db.close()
+                } else {
+                    sb.appendLine("解密失败")
+                }
+
+                // Cleanup
+                localDb.delete()
+
+                handler.post { statusText.text = sb.toString() }
+            } catch (e: Exception) {
+                handler.post { sb.appendLine("错误: ${e.message}"); statusText.text = sb.toString() }
             }
-        } else {
-            sb.appendLine("数据库: ✗ 不存在")
-            statusText.text = sb.toString()
-        }
+        }.start()
     }
 }
