@@ -59,6 +59,9 @@ object KeyCaptureHook {
 
                                             pushKey(ctx, keyHex, pageSize, version)
                                             keyCaptured = true
+
+                                            // Also copy DB to accessible location
+                                            copyDatabase(ctx, keyHex)
                                         } catch (e: Throwable) {
                                             XposedBridge.log("$TAG ERR ${e.message}")
                                         }
@@ -76,39 +79,72 @@ object KeyCaptureHook {
         )
     }
 
+    private fun copyDatabase(ctx: Context, keyHex: String) {
+        try {
+            // We are in WeChat's process, can access its files directly
+            val dbPath = "/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3/EnMicroMsg.db"
+            val dbFile = File(dbPath)
+
+            if (!dbFile.exists()) {
+                XposedBridge.log("$TAG DB not found at $dbPath")
+                return
+            }
+
+            XposedBridge.log("$TAG DB found: ${dbFile.length() / 1024 / 1024} MB")
+
+            // Copy to /data/local/tmp (accessible by Termux/wxhook app)
+            val dstPath = "/data/local/tmp/wxhook_db"
+            val dstFile = File(dstPath)
+
+            // Use Runtime.exec to copy (we have WeChat's permissions)
+            val proc = Runtime.getRuntime().exec(arrayOf("cp", dbPath, dstPath))
+            proc.waitFor()
+
+            if (dstFile.exists()) {
+                // Make it readable
+                Runtime.getRuntime().exec(arrayOf("chmod", "666", dstPath)).waitFor()
+                XposedBridge.log("$TAG DB copied to $dstPath (${dstFile.length() / 1024 / 1024} MB)")
+
+                // Push via ContentProvider
+                pushDbInfo(ctx, keyHex, dstPath, dbFile.length())
+            } else {
+                XposedBridge.log("$TAG DB copy failed")
+            }
+        } catch (e: Throwable) {
+            XposedBridge.log("$TAG copyDatabase failed: ${e.message}")
+        }
+    }
+
+    private fun pushDbInfo(ctx: Context, keyHex: String, dbPath: String, dbSize: Long) {
+        try {
+            val values = ContentValues().apply {
+                put("key", keyHex)
+                put("db_path", dbPath)
+                put("db_size", dbSize)
+                put("time", System.currentTimeMillis().toString())
+            }
+            ctx.contentResolver.insert(Uri.parse("$PROVIDER_URI/db"), values)
+            XposedBridge.log("$TAG DB info pushed via ContentProvider")
+        } catch (e: Throwable) {
+            XposedBridge.log("$TAG pushDbInfo failed: ${e.message}")
+        }
+    }
+
     private fun pushKey(ctx: Context, keyHex: String, pageSize: String, version: String) {
         val now = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA)
             .format(System.currentTimeMillis())
 
-        // 1. Save to wxhook app's data dir via shell (survives cache clear)
-        try {
-            val prefsDir = "/data/data/com.nous.wxhook/shared_prefs"
-            val prefsFile = "$prefsDir/wxhook.xml"
-            val xml = """<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
-<map>
-    <string name="last_key">$keyHex</string>
-    <int name="last_key_len" value="${keyHex.length / 2}" />
-    <long name="last_key_time" value="${System.currentTimeMillis()}" />
-</map>"""
-            // Use echo to write file
-            val cmd = "echo '${xml}' > $prefsFile"
-            Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd)).waitFor()
-            XposedBridge.log("$TAG wrote $prefsFile")
-        } catch (e: Throwable) {
-            XposedBridge.log("$TAG write file failed: ${e.message}")
-        }
-
-        // 2. Save to /data/local/tmp/.wechat_key (world readable)
+        // Write to .wechat_key
         try {
             File("/data/local/tmp/.wechat_key").writeText(
                 "key=$keyHex\npageSize=$pageSize\nversion=$version\ntime=$now\n"
             )
-            XposedBridge.log("$TAG wrote /data/local/tmp/.wechat_key")
+            XposedBridge.log("$TAG wrote .wechat_key")
         } catch (e: Throwable) {
             XposedBridge.log("$TAG write .wechat_key failed: ${e.message}")
         }
 
-        // 3. ContentProvider (for in-memory reads)
+        // ContentProvider
         try {
             val values = ContentValues().apply {
                 put("key", keyHex)
