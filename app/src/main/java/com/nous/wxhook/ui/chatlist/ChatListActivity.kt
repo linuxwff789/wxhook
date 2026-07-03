@@ -22,7 +22,8 @@ data class ChatConversation(
     val username: String,
     val nickname: String,
     val unReadCount: Int,
-    val conversationTime: Long
+    val conversationTime: Long,
+    val typeTag: String
 )
 
 class ChatListActivity : AppCompatActivity() {
@@ -64,7 +65,7 @@ class ChatListActivity : AppCompatActivity() {
                 }
                 val tag = System.currentTimeMillis().toString()
                 val sqlFile = File(cacheDir, "cl_${tag}.sql")
-                sqlFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT c.username,IFNULL(r.nickname,c.username),c.unReadCount,c.conversationTime FROM rconversation c LEFT JOIN rcontact r ON c.username=r.username ORDER BY c.conversationTime DESC LIMIT 200;")
+                sqlFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT c.username,IFNULL(r.nickname,c.username),c.unReadCount,c.conversationTime,CASE WHEN c.username LIKE '%@chatroom' THEN 'group' WHEN c.username LIKE 'gh_%%' THEN 'official' WHEN r.type IN (2,3,259,65537,65539) THEN 'official' ELSE 'contact' END FROM rconversation c LEFT JOIN rcontact r ON c.username=r.username ORDER BY c.conversationTime DESC LIMIT 200;")
                 val sc = "LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher"
                 val proc = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$dbPath' < '${sqlFile.absolutePath}'"))
                 val lines = proc.inputStream.bufferedReader().readLines()
@@ -76,7 +77,7 @@ class ChatListActivity : AppCompatActivity() {
                 for (line in lines) {
                     val p = line.split("|")
                     if (p.size >= 4 && !p[0].startsWith("ok")) {
-                        convs.add(ChatConversation(p[0], p[1], p[2].toIntOrNull()?:0, p.getOrNull(3)?.toLongOrNull()?:0L))
+                        convs.add(ChatConversation(p[0], p[1], p[2].toIntOrNull()?:0, p.getOrNull(3)?.toLongOrNull()?:0L, p.getOrNull(4)?:""))
                     }
                 }
                 Log.i("wxhook:ChatList","parsed ${convs.size} conversations")
@@ -131,7 +132,14 @@ class ChatAdapter(
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         topRow.addView(TextView(ctx).apply {
-            text = item.nickname; textSize = 16f
+            text = buildString {
+                append(when (item.typeTag) {
+                    "group" -> "👥 "
+                    "official" -> "📢 "
+                    else -> "👤 "
+                })
+                append(item.nickname)
+            }; textSize = 16f
             setTextColor(0xDE000000.toInt())
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         })

@@ -33,6 +33,23 @@ data class ChatMessage(
 
 class ChatDetailActivity : AppCompatActivity() {
 
+
+    /** Look up nickname from rcontact by wxid */
+    private val nickCache = ConcurrentHashMap<String, String>()
+    private fun getNickName(wxid: String): String {
+        return nickCache.getOrPut(wxid) {
+            val sc = "LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher"
+            val d = "/sdcard/Download/EnMicroMsg.db"
+            try {
+                val f = File(cacheDir, "nn_${wxid.hashCode()}.sql")
+                f.writeText("PRAGMA key='e9cd2ae';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT nickname FROM rcontact WHERE username='$wxid' LIMIT 1;")
+                val p = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$d' < '${f.absolutePath}'"))
+                val l = p.inputStream.bufferedReader().readLines(); p.waitFor(); f.delete()
+                l.lastOrNull { it.isNotBlank() && !it.startsWith("ok") }?.trim() ?: wxid
+            } catch (_: Exception) { wxid }
+        }
+    }
+
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var recyclerView: RecyclerView
     private var talker = ""
@@ -130,6 +147,23 @@ class MessageAdapter(
     private val execCmd: (String) -> String,
     private val cacheDir: File
 ) : RecyclerView.Adapter<MessageAdapter.VH>() {
+
+
+    /** Look up nickname from rcontact by wxid */
+    private val nickCache = ConcurrentHashMap<String, String>()
+    private fun getNickName(wxid: String): String {
+        return nickCache.getOrPut(wxid) {
+            val sc = "LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher"
+            val d = "/sdcard/Download/EnMicroMsg.db"
+            try {
+                val f = File(cacheDir, "nn_${wxid.hashCode()}.sql")
+                f.writeText("PRAGMA key='e9cd2ae';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT nickname FROM rcontact WHERE username='$wxid' LIMIT 1;")
+                val p = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$d' < '${f.absolutePath}'"))
+                val l = p.inputStream.bufferedReader().readLines(); p.waitFor(); f.delete()
+                l.lastOrNull { it.isNotBlank() && !it.startsWith("ok") }?.trim() ?: wxid
+            } catch (_: Exception) { wxid }
+        }
+    }
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -374,7 +408,19 @@ class MessageAdapter(
     private fun addTextContent(vert: LinearLayout, ctx: android.content.Context, msg: ChatMessage, parsed: MessageParser.ParsedMessage) {
         val tv = TextView(ctx).apply { textSize = 14f; setTextColor(0xDE000000.toInt()); setPadding(0, 8, 0, 0) }
         when (msg.type) {
-            1 -> tv.text = parsed.content ?: "(空)"
+            1 -> {
+                // Check if this is a group message by checking talker ends with @chatroom
+                val raw = parsed.content ?: "(空)"
+                if (talker.contains("@chatroom") && raw.contains(":\")) {
+                    val idx = raw.indexOf(":\")
+                    val sender = raw.substring(0, idx)
+                    val msg = raw.substring(idx + 2).trim()
+                    val nick = getNickName(sender)
+                    tv.text = "\n[$nick]\n$msg"
+                } else {
+                    tv.text = raw
+                }
+            }
             47 -> tv.text = "[表情] ${parsed.content?.take(100) ?: ""}"
             48 -> { tv.text = "[位置] ${parsed.content?.take(100) ?: ""}"; tv.setTextColor(0xFF6200EE.toInt()) }
             42 -> { tv.text = "[名片] ${parsed.content?.take(100) ?: ""}"; tv.setTextColor(0xFF6200EE.toInt()) }
