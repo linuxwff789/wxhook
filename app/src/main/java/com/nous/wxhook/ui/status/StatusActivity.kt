@@ -48,7 +48,7 @@ class StatusActivity : Activity() {
         sb.appendLine()
         statusText.text = sb.toString()
 
-        // Decrypt
+        // Decrypt via dd + sqlcipher
         Thread {
             try {
                 val pid = su("pidof com.tencent.mm")
@@ -57,13 +57,11 @@ class StatusActivity : Activity() {
                 val src = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3/EnMicroMsg.db"
                 val dst = "/sdcard/Download/EnMicroMsg.db"
 
-                // Check if copy exists and is recent
                 val srcSize = su("stat -c %s $src 2>/dev/null")
-                val dstSize = su("stat -c %s $dst 2>/dev/null")
-
                 if (srcSize.isEmpty()) { sb.appendLine("数据库: ✗ 不存在"); post(sb); return@Thread }
                 sb.appendLine("数据库: ${srcSize.toLong() / 1024 / 1024} MB")
 
+                val dstSize = su("stat -c %s $dst 2>/dev/null")
                 if (dstSize != srcSize) {
                     sb.appendLine("复制中 (dd, ~5秒)...")
                     post(sb)
@@ -76,7 +74,6 @@ class StatusActivity : Activity() {
                 sb.appendLine("解密中...")
                 post(sb)
 
-                // Decrypt via sqlcipher
                 val sql = "PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT '消息: '||count(*) FROM message;SELECT '会话: '||count(*) FROM rconversation;SELECT '群聊: '||count(*) FROM chatroom;"
                 val sqlFile = "/sdcard/Download/q.sql"
                 File(sqlFile).writeText(sql)
