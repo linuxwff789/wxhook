@@ -21,32 +21,14 @@ class SearchActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         val scrollView = ScrollView(this)
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 48, 48, 48)
-        }
-
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 48, 48, 48) }
         layout.addView(TextView(this).apply { text = "搜索消息"; textSize = 20f })
-
-        searchText = EditText(this).apply {
-            hint = "输入关键词..."
-            setPadding(0, 32, 0, 0)
-        }
+        searchText = EditText(this).apply { hint = "输入关键词..."; setPadding(0, 32, 0, 0) }
         layout.addView(searchText)
-
-        android.widget.Button(this).apply {
-            text = "搜索"
-            setOnClickListener { performSearch() }
-        }.let { layout.addView(it) }
-
-        resultText = TextView(this).apply {
-            textSize = 12f
-            setPadding(0, 32, 0, 0)
-        }
+        android.widget.Button(this).apply { text = "搜索"; setOnClickListener { performSearch() } }.let { layout.addView(it) }
+        resultText = TextView(this).apply { textSize = 12f; setPadding(0, 32, 0, 0) }
         layout.addView(resultText)
-
         scrollView.addView(layout)
         setContentView(scrollView)
     }
@@ -59,9 +41,7 @@ class SearchActivity : Activity() {
     private fun performSearch() {
         val keyword = searchText.text.toString().trim()
         if (keyword.isEmpty()) { resultText.text = "请输入关键词"; return }
-
         resultText.text = "搜索中..."
-
         Thread {
             var key: String? = null
             try {
@@ -69,25 +49,21 @@ class SearchActivity : Activity() {
                     .lines().find { it.startsWith("key=") }?.removePrefix("key=")
                 if (hex != null) key = hex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
             } catch (_: Exception) {}
-
-            if (key == null) { handler.post { resultText.text = "未捕获密钥"; return@Thread }
+            if (key == null) { handler.post { resultText.text = "未捕获密钥" }; return@Thread }
 
             val dbPath = "/sdcard/Download/EnMicroMsg.db"
-            if (!File(dbPath).exists()) { handler.post { resultText.text = "数据库不存在"; return@Thread }
+            if (!File(dbPath).exists()) { handler.post { resultText.text = "数据库不存在" }; return@Thread }
 
             val timeFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
             val sql = "PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT talker, type, content, createTime, isSend FROM message WHERE content LIKE '%$keyword%' ORDER BY createTime DESC LIMIT 100;"
-
             val sqlFile = "/sdcard/Download/q.sql"
             File(sqlFile).writeText(sql)
             su("chmod 666 $sqlFile")
-
             val output = su("/data/data/com.termux/files/usr/bin/sqlcipher $dbPath < $sqlFile 2>&1")
             su("rm -f $sqlFile")
 
             val sb = StringBuilder()
             val lines = output.lines().filter { it.contains("|") }
-
             if (lines.isEmpty()) {
                 sb.appendLine("未找到包含 \"$keyword\" 的消息")
             } else {
@@ -99,7 +75,6 @@ class SearchActivity : Activity() {
                         val content = parts[2].trim()
                         val timeMs = parts[3].trim().toLongOrNull() ?: 0
                         val isSend = parts[4].trim() == "1"
-
                         val time = timeFormat.format(Date(timeMs))
                         val dir = if (isSend) "→" else "←"
                         sb.appendLine("$time $dir [$talker]")
@@ -108,7 +83,6 @@ class SearchActivity : Activity() {
                     }
                 }
             }
-
             handler.post { resultText.text = sb.toString() }
         }.start()
     }
