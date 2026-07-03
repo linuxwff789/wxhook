@@ -62,7 +62,7 @@ class SearchActivity : Activity() {
                 val timeFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
                 File(sqlFile).writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT talker, type, content, createTime, isSend FROM message WHERE content LIKE '%$keyword%' ORDER BY createTime DESC LIMIT 100;")
                 su("chmod 666 $sqlFile")
-                val output = su("env LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib /data/local/sqlcipher $dbPath < $sqlFile 2>&1")
+                val output = su("LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher $dbPath < $sqlFile 2>&1")
                 su("rm -f $sqlFile")
 
                 val sb = StringBuilder()

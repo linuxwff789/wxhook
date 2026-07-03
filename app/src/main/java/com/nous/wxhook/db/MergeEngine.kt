@@ -10,7 +10,7 @@ import java.io.File
 object MergeEngine {
 
     private const val TAG = "wxhook:Merge"
-    private const val SQLCIPHER = "env LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib /data/local/sqlcipher"
+    private const val SQLCIPHER = "LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher"
 
     enum class MergeStrategy {
         UNION,          // INSERT OR IGNORE
