@@ -1,4 +1,4 @@
-package com.nous.wxhook.data.local
+package com.nous.wxhook.data.local.dao
 
 import androidx.room.*
 import com.nous.wxhook.data.local.entity.*
