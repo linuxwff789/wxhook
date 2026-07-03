@@ -127,7 +127,7 @@ class ChatDetailActivity : AppCompatActivity() {
                 Log.i("wxhook:ChatDtl","exit=0 lines=${lines.size} total=$total parsed=${msgs.size}")
                 handler.post {
                     if (msgs.isEmpty()) setContentView(TextView(this).apply { text = "没有消息"; textSize = 18f })
-                    else { supportActionBar?.subtitle = "共 $total 条"; recyclerView.adapter = MessageAdapter(msgs, ::fileExists, ::resolveWxPath, ::copyToCache, ::execCmd, cacheDir) }
+                    else { supportActionBar?.subtitle = "共 $total 条"; recyclerView.adapter = MessageAdapter(msgs, ::fileExists, ::resolveWxPath, ::copyToCache, ::execCmd, cacheDir, nickCache, talker.contains("@chatroom")) }
                 }
             } catch (e: Exception) {
                 Log.e("wxhook:ChatDtl","failed",e)
@@ -145,27 +145,25 @@ class MessageAdapter(
     private val resolveWxPath: (String?, Int) -> String?,
     private val copyToCache: (String) -> String?,
     private val execCmd: (String) -> String,
-    private val cacheDir: File
+    private val cacheDir: File,
+    private val nickCache: MutableMap<String, String>,
+    private val isGroup: Boolean
 ) : RecyclerView.Adapter<MessageAdapter.VH>() {
 
-
-    /** Look up nickname from rcontact by wxid */
-    private val nickCache = ConcurrentHashMap<String, String>()
-    private fun getNickName(wxid: String): String {
-        return nickCache.getOrPut(wxid) {
-            val sc = "LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher"
-            val d = "/sdcard/Download/EnMicroMsg.db"
-            try {
-                val f = File(cacheDir, "nn_${wxid.hashCode()}.sql")
-                f.writeText("PRAGMA key='e9cd2ae';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT nickname FROM rcontact WHERE username='$wxid' LIMIT 1;")
-                val p = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$d' < '${f.absolutePath}'"))
-                val l = p.inputStream.bufferedReader().readLines(); p.waitFor(); f.delete()
-                l.lastOrNull { it.isNotBlank() && !it.startsWith("ok") }?.trim() ?: wxid
-            } catch (_: Exception) { wxid }
-        }
-    }
-
     private val handler = Handler(Looper.getMainLooper())
+
+    /** Fetch nickname from rcontact via sqlcipher */
+    private fun fetchNickName(wxid: String): String {
+        val sc = "LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher"
+        val d = "/sdcard/Download/EnMicroMsg.db"
+        return try {
+            val f = File(cacheDir, "nn_${wxid.hashCode()}.sql")
+            f.writeText("PRAGMA key='e9cd2ae';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT nickname FROM rcontact WHERE username='$wxid' LIMIT 1;")
+            val p = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$d' < '${f.absolutePath}'"))
+            val l = p.inputStream.bufferedReader().readLines(); p.waitFor(); f.delete()
+            l.lastOrNull { it.isNotBlank() && !it.startsWith("ok") }?.trim() ?: wxid
+        } catch (_: Exception) { wxid }
+    }
 
     class VH(val card: MaterialCardView) : RecyclerView.ViewHolder(card)
 
@@ -410,14 +408,12 @@ class MessageAdapter(
         when (msg.type) {
             1 -> {
                 val raw = parsed.content ?: "(空)"
-                if (talker.contains("@chatroom") && raw.contains(": ")) {
+                if (isGroup && raw.contains(": ")) {
                     val idx = raw.indexOf(": ")
                     val sender = raw.substring(0, idx)
                     val msg = raw.substring(idx + 2).trim()
-                    val nick = getNickName(sender)
-                    tv.text = "
-[$nick]
-$msg"
+                    val nick = nickCache.getOrPut(sender) { fetchNickName(sender) }
+                    tv.text = "\n[$nick]\n$msg"
                 } else {
                     tv.text = raw
                 }
