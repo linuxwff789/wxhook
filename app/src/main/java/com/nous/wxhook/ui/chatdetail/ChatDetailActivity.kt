@@ -245,20 +245,37 @@ class MessageAdapter(
     /** Decrypt wxgf (encrypted WeChat image) to JPEG */
     private fun decryptWxgf(srcPath: String, dstFile: File): String? {
         return try {
-            // Copy encrypted file to temp location first
             val tmpFile = File(cacheDir, "tmp_enc_${dstFile.name}")
             if (!execCmd("cp '$srcPath' '${tmpFile.absolutePath}' && echo ok").contains("ok")) return null
-            val encBytes = tmpFile.readBytes()
-            tmpFile.delete()
+            val encBytes = tmpFile.readBytes(); tmpFile.delete()
             if (encBytes.size < 20) return null
-            // Verify wxgf magic
             if (encBytes[0] != 'w'.code.toByte() || encBytes[1] != 'x'.code.toByte()) return null
-            val jpegHdr = byteArrayOf(-1, -40, -1, -32, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1)
-            val key = ByteArray(16) { i -> (encBytes[4 + i].toInt() xor jpegHdr[i].toInt()).toByte() }
-            val dec = ByteArray(encBytes.size - 4) { i -> (encBytes[4 + i].toInt() xor key[i % 16].toInt()).toByte() }
-            val eoi = dec.indexOfSlice(byteArrayOf(-1, -39))
-            dstFile.writeBytes(if (eoi >= 0) dec.copyOf(eoi + 2) else dec)
-            dstFile.absolutePath
+
+            // Try multiple JPEG header templates
+            val templates = listOf(
+                byteArrayOf(-1, -40, -1, -32, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1),  // JFIF
+                byteArrayOf(-1, -40, -1, -32, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1),  // JFIF v1.2
+                byteArrayOf(-1, -40, -1, -32, 0, 16, 74, 70, 73, 70, 0, 1, 1, 1, 0, 0),  // JFIF v1.1
+                byteArrayOf(-1, -40, -1, -33, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1),  // EXIF (FFE1)
+                byteArrayOf(-1, -40, -1, -31, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1),  // EXIF alt
+            )
+
+            for (jpegHdr in templates) {
+                val key = ByteArray(16) { i -> ((encBytes[4 + i].toInt() and 0xFF) xor (jpegHdr[i].toInt() and 0xFF)).toByte() }
+                val check0 = (encBytes[4].toInt() and 0xFF) xor (key[0].toInt() and 0xFF)
+                val check1 = (encBytes[5].toInt() and 0xFF) xor (key[1].toInt() and 0xFF)
+                if (check0 != 0xFF || check1 != 0xD8) continue
+
+                val dec = ByteArray(encBytes.size - 4) { i ->
+                    ((encBytes[4 + i].toInt() and 0xFF) xor (key[i % 16].toInt() and 0xFF)).toByte()
+                }
+                val eoi = dec.indexOfSlice(byteArrayOf(-1, -39))
+                if (eoi < 0) continue
+                val final = dec.copyOf(eoi + 2)
+                dstFile.writeBytes(final)
+                return dstFile.absolutePath
+            }
+            null  // no template worked
         } catch (e: Exception) { null }
     }
 
