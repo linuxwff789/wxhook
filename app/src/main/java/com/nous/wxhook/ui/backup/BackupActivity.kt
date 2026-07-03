@@ -1,6 +1,7 @@
 package com.nous.wxhook.ui.backup
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -29,17 +30,14 @@ class BackupActivity : Activity() {
 
         layout.addView(TextView(this).apply { text = "备份管理"; textSize = 20f })
 
-        val createBtn = Button(this).apply {
+        layout.addView(Button(this).apply {
             text = "创建备份"
             setOnClickListener { createBackup() }
-        }
-        layout.addView(createBtn)
-
-        val refreshBtn = Button(this).apply {
+        })
+        layout.addView(Button(this).apply {
             text = "刷新列表"
             setOnClickListener { loadBackups() }
-        }
-        layout.addView(refreshBtn)
+        })
 
         contentText = TextView(this).apply {
             textSize = 14f
@@ -58,14 +56,13 @@ class BackupActivity : Activity() {
         Thread {
             val prefs = getSharedPreferences("wxhook", MODE_PRIVATE)
             val key = prefs.getString("last_key", null) ?: "e9cd2ae"
-
             val result = BackupManager.createBackup(this, key, "manual backup")
             handler.post {
                 if (result != null) {
-                    contentText.text = "备份创建成功\n路径: ${result.path}\n大小: ${result.fileSize} bytes"
+                    contentText.text = "备份创建成功\n路径: ${result.path}\n大小: ${result.fileSize / 1024} KB"
                     loadBackups()
                 } else {
-                    contentText.text = "备份创建失败（需要 root）"
+                    contentText.text = "备份创建失败（源数据库不存在）"
                 }
             }
         }.start()
@@ -75,24 +72,48 @@ class BackupActivity : Activity() {
         Thread {
             val backups = BackupManager.listBackups(this)
             val timeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-
             val sb = StringBuilder()
             sb.appendLine("共 ${backups.size} 个备份\n")
 
-            for (backup in backups) {
-                val time = timeFormat.format(Date(backup.timestamp))
-                sb.appendLine("📦 $time")
-                sb.appendLine("   大小: ${backup.fileSize / 1024} KB")
-                sb.appendLine("   路径: ${backup.path}")
-                if (backup.notes != null) sb.appendLine("   备注: ${backup.notes}")
+            backups.forEachIndexed { i, b ->
+                sb.appendLine("${i + 1}. 📦 ${timeFormat.format(Date(b.timestamp))}")
+                sb.appendLine("   大小: ${b.fileSize / 1024} KB")
+                sb.appendLine("   路径: ${b.path}")
+                if (b.notes != null) sb.appendLine("   备注: ${b.notes}")
                 sb.appendLine()
             }
 
-            if (backups.isEmpty()) {
-                sb.appendLine("暂无备份")
-            }
+            if (backups.isEmpty()) sb.appendLine("暂无备份")
+            else sb.appendLine("长按备份可删除")
 
             handler.post { contentText.text = sb.toString() }
+
+            // Add delete buttons for each backup
+            handler.post {
+                contentText.setOnLongClickListener {
+                    if (backups.isNotEmpty()) {
+                        val names = backups.map { timeFormat.format(Date(it.timestamp)) }.toTypedArray()
+                        AlertDialog.Builder(this)
+                            .setTitle("选择要删除的备份")
+                            .setItems(names) { _, which ->
+                                deleteBackup(backups[which].id)
+                            }
+                            .setNegativeButton("取消", null)
+                            .show()
+                    }
+                    true
+                }
+            }
+        }.start()
+    }
+
+    private fun deleteBackup(id: Long) {
+        Thread {
+            val ok = BackupManager.deleteBackup(this, id)
+            handler.post {
+                contentText.text = if (ok) "删除成功" else "删除失败"
+                loadBackups()
+            }
         }.start()
     }
 }

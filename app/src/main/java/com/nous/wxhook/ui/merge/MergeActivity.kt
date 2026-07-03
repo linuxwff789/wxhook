@@ -10,6 +10,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.nous.wxhook.db.BackupManager
 import com.nous.wxhook.db.MergeEngine
+import java.io.File
 
 class MergeActivity : Activity() {
 
@@ -27,11 +28,10 @@ class MergeActivity : Activity() {
 
         layout.addView(TextView(this).apply { text = "数据合并"; textSize = 20f })
 
-        val mergeBtn = Button(this).apply {
+        layout.addView(Button(this).apply {
             text = "合并最近两个备份"
             setOnClickListener { mergeRecent() }
-        }
-        layout.addView(mergeBtn)
+        })
 
         contentText = TextView(this).apply {
             textSize = 14f
@@ -52,23 +52,34 @@ class MergeActivity : Activity() {
                 return@Thread
             }
 
-            val base = backups[0] // Latest
-            val overlay = backups[1] // Second latest
+            val prefs = getSharedPreferences("wxhook", MODE_PRIVATE)
+            val key = prefs.getString("last_key", null) ?: "e9cd2ae"
 
+            val base = backups[0]
+            val overlay = backups[1]
+
+            val baseDb = File(base.path, "EnMicroMsg.db").absolutePath
+            val overlayDb = File(overlay.path, "EnMicroMsg.db").absolutePath
+            val outputDb = File(base.path, "EnMicroMsg_merged.db").absolutePath
+
+            contentText.text = "合并中（命令行执行，可能需几秒）..."
             val result = MergeEngine.mergeDatabases(
-                baseDbPath = base.path + "/EnMicroMsg.db",
-                overlayDbPath = overlay.path + "/EnMicroMsg.db",
-                outputPath = base.path + "/EnMicroMsg_merged.db",
-                config = MergeEngine.MergeConfig(strategy = MergeEngine.MergeStrategy.NEWEST_WINS)
+                baseDbPath = baseDb,
+                overlayDbPath = overlayDb,
+                outputPath = outputDb,
+                config = MergeEngine.MergeConfig(
+                    strategy = MergeEngine.MergeStrategy.NEWEST_WINS,
+                    key = key
+                )
             )
 
             handler.post {
                 val sb = StringBuilder()
                 sb.appendLine("合并结果:")
-                sb.appendLine("策略: NEWEST_WINS")
-                sb.appendLine("源消息数: ${result.totalMessages}")
-                sb.appendLine("插入消息数: ${result.mergedMessages}")
-                sb.appendLine("去重数: ${result.duplicatesRemoved}")
+                sb.appendLine("策略: NEWEST_WINS (同msgSvrID取最新)")
+                sb.appendLine("总消息数: ${result.totalMessages}")
+                sb.appendLine("新增插入: ${result.mergedMessages}")
+                sb.appendLine("去重跳过: ${result.duplicatesRemoved}")
                 if (result.conflicts.isNotEmpty()) {
                     sb.appendLine("冲突: ${result.conflicts.size} 条")
                 }

@@ -1,21 +1,22 @@
 package com.nous.wxhook.db
 
 import android.content.Context
-import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.util.Log
 import java.io.File
 
+/** SQLCipher CLI path inside Termux. */
+private const val SQLCIPHER = "/data/data/com.termux/files/usr/bin/sqlcipher"
+
 /**
- * WeChat EnMicroMsg.db decryptor.
- * SQLCipher params: cipher_compatibility=3, page_size=1024, kdf_iter=4000, hmac=OFF
- * Key: e9cd2ae (7 bytes, from setCipherKey hook)
+ * WeChat EnMicroMsg.db tools.
+ *
+ * PRAGMA key = e9cd2ae
+ * cipher_compatibility = 3, page_size = 1024, kdf_iter = 4000, hmac = OFF
  */
 object WeChatDbDecryptor {
 
     private const val TAG = "wxhook:Decryptor"
-
-    // WeChat DB paths (relative to /data/data/com.tencent.mm/MicroMsg/{hash}/)
     private const val DB_NAME = "EnMicroMsg.db"
     private const val DB_HASH_DIR = "6d1f34a5edc49e8b6d238141b2d004f3"
 
@@ -36,152 +37,121 @@ object WeChatDbDecryptor {
         val messageCount: Long = 0
     )
 
+    private fun prg(key: String) = """
+PRAGMA key='$key';
+PRAGMA cipher_compatibility=3;
+PRAGMA cipher_page_size=1024;
+PRAGMA kdf_iter=4000;
+PRAGMA cipher_use_hmac=OFF;
+""".trimIndent()
+
+    // ── CLI-based helpers (preferred) ──────────────────────────
+
     /**
-     * Open decrypted WeChat database.
-     * Returns null if decryption fails.
+     * Run a single SQL query against a decrypted DB via sqlcipher CLI.
+     * Returns the last line of output, or null on failure.
      */
-    fun openDecryptedDb(
-        dbPath: String,
-        config: DbConfig = DbConfig()
-    ): SQLiteDatabase? {
+    fun cliQuery(dbPath: String, query: String, key: String = "e9cd2ae"): String? {
+        return try {
+            val sql = prg(key) + query
+            val tmp = File("/data/local/tmp/_q_tmp.sql").apply { writeText(sql) }
+            val proc = Runtime.getRuntime().exec(arrayOf(
+                "su", "-c",
+                "$SQLCIPHER '$dbPath' < '${tmp.absolutePath}' 2>/dev/null | tail -1"
+            ))
+            val out = proc.inputStream.bufferedReader().readText().trim()
+            proc.waitFor()
+            tmp.delete()
+            out.ifBlank { null }
+        } catch (e: Exception) {
+            Log.e(TAG, "CLI query failed: ${e.message}"); null
+        }
+    }
+
+    /** Count rows in the given table via CLI. */
+    fun cliCount(dbPath: String, table: String = "message", key: String = "e9cd2ae"): Long {
+        val r = cliQuery(dbPath, "SELECT count(*) FROM $table;", key)
+        return r?.toLongOrNull() ?: -1L
+    }
+
+    /** Get row counts for known tables via CLI. */
+    fun cliGetStats(dbPath: String, key: String = "e9cd2ae"): Map<String, Long> {
+        val stats = mutableMapOf<String, Long>()
+        for (t in listOf("message", "rcontact", "rconversation", "ImgInfo2", "VoiceInfo")) {
+            stats[t] = cliCount(dbPath, t, key)
+        }
+        return stats
+    }
+
+    // ── Legacy Android-SQLite methods (won't work on encrypted DB) ──
+
+    /**
+     * Opens a decrypted DB via Android SQLiteDatabase.
+     * ⚠ This does NOT support SQLCipher and will fail on encrypted DBs.
+     * Use cliQuery / cliCount instead.
+     */
+    @Deprecated("Use cliQuery — Android SQLite cannot open SQLCipher DBs")
+    fun openDecryptedDb(dbPath: String, config: DbConfig = DbConfig()): SQLiteDatabase? {
+        Log.w(TAG, "openDecryptedDb() uses Android SQLite — won't open SQLCipher DB. Use cliQuery instead.")
         return try {
             val sql = buildString {
                 append("PRAGMA key = '${config.key}'; ")
                 append("PRAGMA cipher_compatibility = ${config.cipherCompatibility}; ")
                 append("PRAGMA cipher_page_size = ${config.pageSize}; ")
                 append("PRAGMA kdf_iter = ${config.kdfIter}; ")
-                if (!config.hmacEnabled) {
-                    append("PRAGMA cipher_use_hmac = OFF; ")
-                }
+                if (!config.hmacEnabled) append("PRAGMA cipher_use_hmac = OFF; ")
             }
-
-            val db = SQLiteDatabase.openDatabase(
-                dbPath, null,
-                SQLiteDatabase.OPEN_READONLY,
-                null
-            )
-
-            // Execute PRAGMA settings
-            val cursor = db.rawQuery(sql + "SELECT count(*) FROM sqlite_master", null)
+            val db = SQLiteDatabase.openDatabase(dbPath, null, SQLiteDatabase.OPEN_READONLY, null)
+            val cursor = db.rawQuery("$sql SELECT count(*) FROM sqlite_master", null)
             if (cursor.moveToFirst()) {
-                val tableCount = cursor.getInt(0)
-                Log.i(TAG, "Decrypted DB: $tableCount tables")
-                cursor.close()
-                db
+                Log.i(TAG, "Decrypted DB: ${cursor.getInt(0)} tables")
+                cursor.close(); db
             } else {
-                cursor.close()
-                db.close()
-                Log.e(TAG, "Failed to decrypt DB")
-                null
+                cursor.close(); db.close()
+                Log.e(TAG, "Failed to decrypt DB"); null
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Decrypt failed: ${e.message}")
-            null
-        }
+        } catch (e: Exception) { Log.e(TAG, "Decrypt failed: ${e.message}"); null }
     }
 
-    /**
-     * Query messages from decrypted database.
-     */
-    fun queryMessages(
-        db: SQLiteDatabase,
-        talker: String,
-        limit: Int = 100,
-        offset: Int = 0
-    ): List<Map<String, Any?>> {
-        val messages = mutableListOf<Map<String, Any?>>()
+    @Deprecated("Use cliQuery — Android SQLite cannot open SQLCipher DBs")
+    fun queryMessages(db: SQLiteDatabase, talker: String, limit: Int = 100, offset: Int = 0): List<Map<String, Any?>> {
+        val msgs = mutableListOf<Map<String, Any?>>()
         val cursor = db.rawQuery(
-            """SELECT localId, TalkerId, msgSvrID, type, subType, 
-                      content, isSend, createTime, talker, imgPath
-               FROM message 
-               WHERE talker = ? 
-               ORDER BY createTime DESC 
-               LIMIT ? OFFSET ?""",
+            "SELECT localId,TalkerId,msgSvrID,type,subType,content,isSend,createTime,talker,imgPath " +
+            "FROM message WHERE talker=? ORDER BY createTime DESC LIMIT ? OFFSET ?",
             arrayOf(talker, limit.toString(), offset.toString())
         )
-
-        while (cursor.moveToNext()) {
-            messages.add(mapOf(
-                "msgId" to cursor.getLong(0),
-                "talkerId" to cursor.getLong(1),
-                "msgSvrId" to cursor.getLong(2),
-                "type" to cursor.getInt(3),
-                "subType" to cursor.getInt(4),
-                "content" to cursor.getString(5),
-                "isSend" to (cursor.getInt(6) == 1),
-                "createTime" to cursor.getLong(7),
-                "talker" to cursor.getString(8),
-                "imgPath" to cursor.getString(9)
-            ))
-        }
-        cursor.close()
-        return messages
+        while (cursor.moveToNext()) msgs.add(mapOf(
+            "msgId" to cursor.getLong(0), "talkerId" to cursor.getLong(1),
+            "msgSvrId" to cursor.getLong(2), "type" to cursor.getInt(3),
+            "subType" to cursor.getInt(4), "content" to cursor.getString(5),
+            "isSend" to (cursor.getInt(6) == 1), "createTime" to cursor.getLong(7),
+            "talker" to cursor.getString(8), "imgPath" to cursor.getString(9)
+        ))
+        cursor.close(); return msgs
     }
 
-    /**
-     * Query all conversations.
-     */
+    @Deprecated("Use cliQuery — Android SQLite cannot open SQLCipher DBs")
     fun queryConversations(db: SQLiteDatabase): List<Map<String, Any?>> {
-        val conversations = mutableListOf<Map<String, Any?>>()
-        val cursor = db.rawQuery(
-            """SELECT cusername, md_msg_seq, unReadCount 
-               FROM rconversation 
-               ORDER BY md_msg_seq DESC""",
-            null
-        )
-
-        while (cursor.moveToNext()) {
-            conversations.add(mapOf(
-                "username" to cursor.getString(0),
-                "lastMsgSeq" to cursor.getLong(1),
-                "unreadCount" to cursor.getInt(2)
-            ))
-        }
-        cursor.close()
-        return conversations
+        val list = mutableListOf<Map<String, Any?>>()
+        val cursor = db.rawQuery("SELECT cusername,md_msg_seq,unReadCount FROM rconversation ORDER BY md_msg_seq DESC", null)
+        while (cursor.moveToNext()) list.add(mapOf("username" to cursor.getString(0), "lastMsgSeq" to cursor.getLong(1), "unreadCount" to cursor.getInt(2)))
+        cursor.close(); return list
     }
 
-    /**
-     * Query contacts.
-     */
+    @Deprecated("Use cliQuery — Android SQLite cannot open SQLCipher DBs")
     fun queryContacts(db: SQLiteDatabase): List<Map<String, Any?>> {
-        val contacts = mutableListOf<Map<String, Any?>>()
-        val cursor = db.rawQuery(
-            """SELECT username, nickname, alias, type 
-               FROM rcontact 
-               WHERE type IN (1, 2, 3, 33)
-               ORDER BY nickname ASC""",
-            null
-        )
-
-        while (cursor.moveToNext()) {
-            contacts.add(mapOf(
-                "username" to cursor.getString(0),
-                "nickname" to cursor.getString(1),
-                "alias" to cursor.getString(2),
-                "type" to cursor.getInt(3)
-            ))
-        }
-        cursor.close()
-        return contacts
+        val list = mutableListOf<Map<String, Any?>>()
+        val cursor = db.rawQuery("SELECT username,nickname,alias,type FROM rcontact WHERE type IN (1,2,3,33) ORDER BY nickname ASC", null)
+        while (cursor.moveToNext()) list.add(mapOf("username" to cursor.getString(0), "nickname" to cursor.getString(1), "alias" to cursor.getString(2), "type" to cursor.getInt(3)))
+        cursor.close(); return list
     }
 
-    /**
-     * Get database statistics.
-     */
+    @Deprecated("Use cliGetStats — Android SQLite cannot open SQLCipher DBs")
     fun getStats(db: SQLiteDatabase): Map<String, Long> {
         val stats = mutableMapOf<String, Long>()
-        val tables = listOf("message", "rcontact", "rconversation", "ImgInfo2", "VoiceInfo")
-        for (table in tables) {
-            try {
-                val cursor = db.rawQuery("SELECT count(*) FROM $table", null)
-                if (cursor.moveToFirst()) {
-                    stats[table] = cursor.getLong(0)
-                }
-                cursor.close()
-            } catch (e: Exception) {
-                stats[table] = -1
-            }
+        for (t in listOf("message", "rcontact", "rconversation", "ImgInfo2", "VoiceInfo")) {
+            try { val c = db.rawQuery("SELECT count(*) FROM $t", null); if (c.moveToFirst()) stats[t] = c.getLong(0); c.close() } catch (_: Exception) { stats[t] = -1L }
         }
         return stats
     }

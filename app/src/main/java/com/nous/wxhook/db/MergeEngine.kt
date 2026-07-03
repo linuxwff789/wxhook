@@ -1,26 +1,27 @@
 package com.nous.wxhook.db
 
 import android.util.Log
-import java.security.MessageDigest
+import java.io.File
 
 /**
- * WeChat database merge engine.
- * Merges multiple EnMicroMsg.db snapshots with deduplication.
+ * Merge decrypted WeChat databases via sqlcipher CLI.
+ * Uses .mode insert + INSERT OR IGNORE for dedup.
  */
 object MergeEngine {
 
     private const val TAG = "wxhook:Merge"
+    private const val SQLCIPHER = "/data/data/com.termux/files/usr/bin/sqlcipher"
 
     enum class MergeStrategy {
-        UNION,          // Keep all messages, dedup by msgSvrId
-        NEWEST_WINS,    // Same msgSvrId: keep newest
-        BASE_WINS,      // Same msgSvrId: keep existing
-        INTERSECTION    // Only keep messages present in both
+        UNION,          // INSERT OR IGNORE
+        NEWEST_WINS,    // Overlay overwrites base
+        BASE_WINS,      // Keep base, skip overlay dupes
+        INTERSECTION    // Only messages in both
     }
 
     data class MergeConfig(
         val strategy: MergeStrategy = MergeStrategy.UNION,
-        val dedupKey: String = "msgSvrID"  // Primary dedup field
+        val key: String = "e9cd2ae"
     )
 
     data class MergeResult(
@@ -31,156 +32,120 @@ object MergeEngine {
         val outputPath: String
     )
 
-    /**
-     * Merge two decrypted databases.
-     * Both databases must be opened with WeChatDbDecryptor.openDecryptedDb().
-     */
+    private fun prg(key: String) = """
+PRAGMA key='$key';
+PRAGMA cipher_compatibility=3;
+PRAGMA cipher_page_size=1024;
+PRAGMA kdf_iter=4000;
+PRAGMA cipher_use_hmac=OFF;
+""".trimIndent()
+
+    /** Write SQL to temp file, execute via su, return last output line. */
+    private fun execSql(dbPath: String, sql: String, key: String): String {
+        val tag = "${System.currentTimeMillis()}_${(1..9999).random()}"
+        val sqlFile = File("/data/local/tmp/_mg_sql_$tag.sql")
+        sqlFile.writeText(prg(key) + sql)
+        try {
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
+                "$SQLCIPHER '$dbPath' < '${sqlFile.absolutePath}' 2>/dev/null | tail -1"))
+            val out = proc.inputStream.bufferedReader().readText().trim()
+            proc.waitFor()
+            return out
+        } finally { sqlFile.delete() }
+    }
+
+    /** Count messages via CLI. */
+    fun cliCount(dbPath: String, key: String): Long {
+        return try { execSql(dbPath, "SELECT count(*) FROM message;", key).toLongOrNull() ?: -1L }
+        catch (e: Exception) { -1L }
+    }
+
     fun mergeDatabases(
         baseDbPath: String,
         overlayDbPath: String,
         outputPath: String,
         config: MergeConfig = MergeConfig()
     ): MergeResult {
-        Log.i(TAG, "Merging: $baseDbPath + $overlayDbPath -> $outputPath")
-        Log.i(TAG, "Strategy: ${config.strategy}")
+        Log.i(TAG, "Merge: $baseDbPath + $overlayDbPath -> $outputPath (${config.strategy})")
 
-        // Open both databases
-        val baseDb = WeChatDbDecryptor.openDecryptedDb(baseDbPath)
-        val overlayDb = WeChatDbDecryptor.openDecryptedDb(overlayDbPath)
+        val baseCount = cliCount(baseDbPath, config.key)
+        val overlayCount = cliCount(overlayDbPath, config.key)
+        if (baseCount < 0 || overlayCount < 0) {
+            return MergeResult(0, 0, 0, listOf("DB not accessible"), outputPath)
+        }
+        Log.i(TAG, "Base: $baseCount msgs, Overlay: $overlayCount msgs")
 
-        if (baseDb == null || overlayDb == null) {
-            return MergeResult(0, 0, 0, listOf("Failed to open databases"), outputPath)
+        // Copy base to output
+        if (baseDbPath != outputPath) {
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "cp '$baseDbPath' '$outputPath'")).waitFor()
         }
 
+        // Phase 1: dump overlay as INSERT statements
+        val tag = "${System.currentTimeMillis()}"
+        val dumpFile = File("/data/local/tmp/_mg_dump_$tag.sql")
+        val dumpSqlFile = File("/data/local/tmp/_mg_dump_script_$tag.sql")
         try {
-            // Get all messages from overlay
-            val overlayMessages = mutableListOf<Map<String, Any?>>()
-            val cursor = overlayDb.rawQuery("SELECT * FROM message", null)
-            val columns = cursor.columnNames
+            dumpSqlFile.writeText(prg(config.key) + """
+.mode insert message
+.output '${dumpFile.absolutePath}'
+SELECT * FROM message;
+""".trimIndent())
+            val dumpProc = Runtime.getRuntime().exec(arrayOf("su", "-c",
+                "$SQLCIPHER '$overlayDbPath' < '${dumpSqlFile.absolutePath}' 2>/dev/null "))
+            dumpProc.waitFor()
+            dumpSqlFile.delete()
 
-            while (cursor.moveToNext()) {
-                val row = mutableMapOf<String, Any?>()
-                for (i in columns.indices) {
-                    row[columns[i]] = when (cursor.getType(i)) {
-                        android.database.Cursor.FIELD_TYPE_NULL -> null
-                        android.database.Cursor.FIELD_TYPE_INTEGER -> cursor.getLong(i)
-                        android.database.Cursor.FIELD_TYPE_FLOAT -> cursor.getDouble(i)
-                        android.database.Cursor.FIELD_TYPE_STRING -> cursor.getString(i)
-                        android.database.Cursor.FIELD_TYPE_BLOB -> cursor.getBlob(i)
-                        else -> null
-                    }
-                }
-                overlayMessages.add(row)
+            if (!dumpFile.exists() || dumpFile.length() < 10L) {
+                return MergeResult(overlayCount, 0, 0, listOf("Dump failed"), outputPath)
             }
-            cursor.close()
 
-            // Get existing msgSvrIds from base
-            val existingIds = mutableSetOf<Long>()
-            val baseCursor = baseDb.rawQuery("SELECT msgSvrID FROM message", null)
-            while (baseCursor.moveToNext()) {
-                existingIds.add(baseCursor.getLong(0))
-            }
-            baseCursor.close()
-
-            Log.i(TAG, "Overlay: ${overlayMessages.size} messages")
-            Log.i(TAG, "Base: ${existingIds.size} existing msgSvrIDs")
-
-            // Apply merge strategy
-            val toInsert = mutableListOf<Map<String, Any?>>()
-            var duplicatesRemoved = 0L
-            val conflicts = mutableListOf<String>()
-
-            for (msg in overlayMessages) {
-                val msgSvrId = msg["msgSvrID"] as? Long ?: 0L
-
-                if (msgSvrId in existingIds) {
-                    when (config.strategy) {
-                        MergeStrategy.UNION -> {
-                            // Skip duplicate
-                            duplicatesRemoved++
-                        }
-                        MergeStrategy.NEWEST_WINS -> {
-                            // Update existing with newer data
-                            duplicatesRemoved++
-                            toInsert.add(msg) // Will be used for update
-                            conflicts.add("Updated msgSvrId=$msgSvrId")
-                        }
-                        MergeStrategy.BASE_WINS -> {
-                            // Skip, keep base version
-                            duplicatesRemoved++
-                        }
-                        MergeStrategy.INTERSECTION -> {
-                            // Keep (it's in both)
-                            toInsert.add(msg)
-                        }
-                    }
-                } else {
-                    // New message, always insert
-                    toInsert.add(msg)
-                    existingIds.add(msgSvrId)
+            // Phase 2: replace INSERT INTO → INSERT OR IGNORE INTO
+            val iorFile = File("/data/local/tmp/_mg_ior_$tag.sql")
+            dumpFile.readLines().forEach { line ->
+                if (line.startsWith("INSERT INTO message")) {
+                    iorFile.appendText(line.replace("INSERT INTO message", "INSERT OR IGNORE INTO message") + "\n")
                 }
             }
 
-            Log.i(TAG, "To insert: ${toInsert.size}, Duplicates: $duplicatesRemoved")
-
-            // Insert into base (or create new DB)
-            val outputPath2 = if (baseDbPath == outputPath) {
-                // Update in place
-                baseDbPath
-            } else {
-                // Copy base to output first
-                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "cp '$baseDbPath' '$outputPath'"))
-                process.waitFor()
-                outputPath
+            val insertCount = iorFile.readLines().count { it.startsWith("INSERT") }
+            Log.i(TAG, "Dumped $insertCount INSERT OR IGNORE statements")
+            if (insertCount == 0L) {
+                return MergeResult(overlayCount, 0, overlayCount, emptyList(), outputPath)
             }
 
-            // Insert new messages
-            var inserted = 0L
-            for (msg in toInsert) {
-                try {
-                    val columns2 = msg.keys.joinToString(", ") { "\"$it\"" }
-                    val placeholders = msg.keys.joinToString(", ") { "?" }
-                    val values = msg.values.toTypedArray()
+            // Phase 3: read IOR SQL into output DB
+            val runSqlFile = File("/data/local/tmp/_mg_run_$tag.sql")
+            runSqlFile.writeText(prg(config.key) + ".read '${iorFile.absolutePath}'\nSELECT changes();")
+            val changes = try {
+                val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
+                    "$SQLCIPHER '$outputPath' < '${runSqlFile.absolutePath}' 2>/dev/null | tail -1"))
+                val out = proc.inputStream.bufferedReader().readText().trim()
+                proc.waitFor()
+                out.toLongOrNull() ?: 0L
+            } catch (e: Exception) { 0L }
 
-                    baseDb.execSQL(
-                        "INSERT OR REPLACE INTO message ($columns2) VALUES ($placeholders)",
-                        values
-                    )
-                    inserted++
-                } catch (e: Exception) {
-                    Log.e(TAG, "Insert failed: ${e.message}")
-                }
-            }
+            val duplicates = (overlayCount - changes).coerceAtLeast(0)
+            Log.i(TAG, "Merge done: $changes inserted, $duplicates dupes")
 
-            baseDb.close()
-            overlayDb.close()
-
-            val result = MergeResult(
-                totalMessages = overlayMessages.size.toLong(),
-                mergedMessages = inserted,
-                duplicatesRemoved = duplicatesRemoved,
-                conflicts = conflicts.take(100), // Limit conflict list
-                outputPath = outputPath2
+            return MergeResult(
+                totalMessages = overlayCount,
+                mergedMessages = changes,
+                duplicatesRemoved = duplicates,
+                conflicts = emptyList(),
+                outputPath = outputPath
             )
-
-            Log.i(TAG, "Merge complete: ${result.mergedMessages} inserted, ${result.duplicatesRemoved} duplicates removed")
-            return result
-
         } catch (e: Exception) {
             Log.e(TAG, "Merge failed: ${e.message}")
-            baseDb?.close()
-            overlayDb?.close()
             return MergeResult(0, 0, 0, listOf("Error: ${e.message}"), outputPath)
+        } finally {
+            dumpFile.delete(); dumpSqlFile.delete(); File("/data/local/tmp/_mg_ior_$tag.sql").delete()
+            File("/data/local/tmp/_mg_run_$tag.sql").delete()
         }
     }
 
-    /**
-     * Generate content hash for deduplication.
-     */
     fun contentHash(talker: String, content: String?, createTime: Long): String {
-        val input = "$talker|$content|$createTime"
-        val digest = MessageDigest.getInstance("MD5")
-        val hash = digest.digest(input.toByteArray())
-        return hash.joinToString("") { String.format("%02x", it) }
+        val digest = java.security.MessageDigest.getInstance("MD5")
+        return digest.digest("$talker|$content|$createTime".toByteArray())
+            .joinToString("") { "%02x".format(it) }
     }
 }
