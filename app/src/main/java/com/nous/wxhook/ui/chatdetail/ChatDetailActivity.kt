@@ -110,7 +110,7 @@ class ChatDetailActivity : AppCompatActivity() {
                 Log.i("wxhook:ChatDtl","exit=0 lines=${lines.size} total=$total parsed=${msgs.size}")
                 handler.post {
                     if (msgs.isEmpty()) setContentView(TextView(this).apply { text = "没有消息"; textSize = 18f })
-                    else { supportActionBar?.subtitle = "共 $total 条"; recyclerView.adapter = MessageAdapter(msgs, ::fileExists, ::resolveWxPath, ::copyToCache, cacheDir) }
+                    else { supportActionBar?.subtitle = "共 $total 条"; recyclerView.adapter = MessageAdapter(msgs, ::fileExists, ::resolveWxPath, ::copyToCache, ::execCmd, cacheDir) }
                 }
             } catch (e: Exception) {
                 Log.e("wxhook:ChatDtl","failed",e)
@@ -127,6 +127,7 @@ class MessageAdapter(
     private val fileExists: (String) -> Boolean,
     private val resolveWxPath: (String?, Int) -> String?,
     private val copyToCache: (String) -> String?,
+    private val execCmd: (String) -> String,
     private val cacheDir: File
 ) : RecyclerView.Adapter<MessageAdapter.VH>() {
 
