@@ -1,7 +1,8 @@
 package com.nous.wxhook.xposed.hook
 
+import android.content.ContentValues
 import android.content.Context
-import android.content.Intent
+import android.net.Uri
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
@@ -12,6 +13,7 @@ object KeyCaptureHook {
 
     private const val TAG = "[wxhook:Key]"
     private const val KNOWN_KEY = "e9cd2ae"
+    private const val PROVIDER_URI = "content://com.nous.wxhook.provider/key"
     private var keyCaptured = false
 
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
@@ -42,7 +44,7 @@ object KeyCaptureHook {
                                             val pageSize = args.getOrNull(1)?.toString() ?: "?"
                                             val version = args.getOrNull(2)?.toString() ?: "?"
 
-                                            saveKey(ctx, keyHex, pageSize, version)
+                                            pushKey(ctx, keyHex, pageSize, version)
                                             keyCaptured = true
                                         } catch (e: Throwable) {
                                             XposedBridge.log("$TAG ERR ${e.message}")
@@ -56,53 +58,46 @@ object KeyCaptureHook {
 
                     } catch (e: Throwable) {
                         XposedBridge.log("$TAG Database class not found (Tinker), using known key")
-                        saveKey(ctx, KNOWN_KEY, "1024", "3")
+                        pushKey(ctx, KNOWN_KEY, "1024", "3")
                     }
                 }
             }
         )
     }
 
-    private fun saveKey(ctx: Context, keyHex: String, pageSize: String, version: String) {
+    private fun pushKey(ctx: Context, keyHex: String, pageSize: String, version: String) {
+        val now = java.text.SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA
+        ).format(System.currentTimeMillis())
+
+        // Method 1: ContentProvider (most reliable across processes)
         try {
-            val now = java.text.SimpleDateFormat(
-                "yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA
-            ).format(System.currentTimeMillis())
-
-            // 1. Save to WeChat's own shared_prefs (XP module can write here)
-            try {
-                val prefs = ctx.getSharedPreferences("wxhook_key", Context.MODE_PRIVATE)
-                prefs.edit()
-                    .putString("key", keyHex)
-                    .putString("page_size", pageSize)
-                    .putString("version", version)
-                    .putString("time", now)
-                    .apply()
-                XposedBridge.log("$TAG saved to WeChat shared_prefs")
-            } catch (e: Throwable) {
-                XposedBridge.log("$TAG save to WeChat prefs failed: ${e.message}")
+            val values = ContentValues().apply {
+                put("key", keyHex)
+                put("page_size", pageSize)
+                put("version", version)
+                put("time", now)
             }
+            ctx.contentResolver.insert(Uri.parse(PROVIDER_URI), values)
+            XposedBridge.log("$TAG key pushed via ContentProvider: $keyHex")
+        } catch (e: Throwable) {
+            XposedBridge.log("$TAG ContentProvider failed: ${e.message}")
 
-            // 2. Broadcast key to wxhook app
+            // Method 2: Broadcast fallback (may be blocked by MIUI)
             try {
-                val intent = Intent("com.nous.wxhook.KEY_CAPTURED").apply {
+                val intent = android.content.Intent("com.nous.wxhook.KEY_CAPTURED").apply {
                     putExtra("key", keyHex)
                     putExtra("keyLen", keyHex.length / 2)
-                    putExtra("pageSize", pageSize)
-                    putExtra("version", version)
-                    putExtra("time", now)
                     setPackage("com.nous.wxhook")
                 }
                 ctx.sendBroadcast(intent)
-                XposedBridge.log("$TAG broadcast sent to wxhook")
-            } catch (e: Throwable) {
-                XposedBridge.log("$TAG broadcast failed: ${e.message}")
+                XposedBridge.log("$TAG broadcast sent as fallback")
+            } catch (e2: Throwable) {
+                XposedBridge.log("$TAG broadcast also failed: ${e2.message}")
             }
-
-            XposedBridge.log("$TAG KEY_CAPTURED key=$keyHex pageSize=$pageSize version=$version")
-        } catch (e: Throwable) {
-            XposedBridge.log("$TAG saveKey failed: ${e.message}")
         }
+
+        XposedBridge.log("$TAG KEY_CAPTURED key=$keyHex pageSize=$pageSize version=$version")
     }
 
     fun getLastKey(): String? {
