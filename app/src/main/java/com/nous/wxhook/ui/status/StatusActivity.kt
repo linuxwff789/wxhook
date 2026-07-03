@@ -69,60 +69,50 @@ class StatusActivity : Activity() {
 
         sb.appendLine("\n=== 数据库状态 ===")
 
+        // Check local DB copy
+        val localDb = "/sdcard/Download/EnMicroMsg.db"
+        val localSize = runSu("stat -c %s $localDb 2>/dev/null")
+
+        if (localSize.isEmpty()) {
+            sb.appendLine("本地数据库: ✗ 不存在")
+            sb.appendLine("请先运行: su -c 'cp /proc/\$(pidof com.tencent.mm)/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3/EnMicroMsg.db /sdcard/Download/EnMicroMsg.db'")
+            statusText.text = sb.toString()
+            return
+        }
+
+        sb.appendLine("本地数据库: ✓ ${localSize.toLong() / 1024 / 1024} MB")
+        sb.appendLine("解密中...")
+        statusText.text = sb.toString()
+
+        // Decrypt in background thread
         Thread {
             try {
-                val pid = runSu("pidof com.tencent.mm")
-                if (pid.isEmpty()) {
-                    handler.post { sb.appendLine("微信未运行"); statusText.text = sb.toString() }
-                    return@Thread
-                }
+                val sql = "PRAGMA key = 'e9cd2ae';\n" +
+                    "PRAGMA cipher_compatibility = 3;\n" +
+                    "PRAGMA cipher_page_size = 1024;\n" +
+                    "PRAGMA kdf_iter = 4000;\n" +
+                    "PRAGMA cipher_use_hmac = OFF;\n" +
+                    "SELECT 'message: ' || count(*) FROM message;\n" +
+                    "SELECT 'rconversation: ' || count(*) FROM rconversation;\n" +
+                    "SELECT 'chatroom: ' || count(*) FROM chatroom;\n"
 
-                val srcDb = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3/EnMicroMsg.db"
-                val localDb = "/sdcard/Download/EnMicroMsg.db"
+                val sqlFile = "/sdcard/Download/wxhook_query.sql"
+                File(sqlFile).writeText(sql)
+                runSu("chmod 666 $sqlFile")
 
-                val size = runSu("stat -c %s $srcDb 2>/dev/null")
-                if (size.isEmpty()) {
-                    handler.post { sb.appendLine("数据库: ✗ 不存在"); statusText.text = sb.toString() }
-                    return@Thread
-                }
-
-                sb.appendLine("数据库: ✓ ${size.toLong() / 1024 / 1024} MB")
-
-                // Copy if needed
-                val localSize = runSu("stat -c %s $localDb 2>/dev/null")
-                if (localSize != size) {
-                    sb.appendLine("复制到 /sdcard/Download...")
-                    handler.post { statusText.text = sb.toString() }
-                    runSu("cp $srcDb $localDb && chmod 666 $localDb")
-                    sb.appendLine("复制完成")
-                } else {
-                    sb.appendLine("使用本地副本")
-                }
-
-                sb.appendLine("解密中...")
-                handler.post { statusText.text = sb.toString() }
-
-                // Decrypt via su + sqlcipher
-                val sql = """PRAGMA key = 'e9cd2ae';
-PRAGMA cipher_compatibility = 3;
-PRAGMA cipher_page_size = 1024;
-PRAGMA kdf_iter = 4000;
-PRAGMA cipher_use_hmac = OFF;
-SELECT 'message: ' || count(*) FROM message;
-SELECT 'rconversation: ' || count(*) FROM rconversation;
-SELECT 'chatroom: ' || count(*) FROM chatroom;"""
-
-                val sqlFile = "/sdcard/Download/query.sql"
-                runSu("echo '${sql.replace("'", "'\\''")}' > $sqlFile")
                 val output = runSu("/data/data/com.termux/files/usr/bin/sqlcipher $localDb < $sqlFile 2>&1")
                 runSu("rm $sqlFile")
 
-                sb.appendLine("\n=== 解密统计 ===")
-                output.lines().filter { it.contains(":") }.forEach { sb.appendLine(it.trim()) }
-
-                handler.post { statusText.text = sb.toString() }
+                handler.post {
+                    sb.appendLine("\n=== 解密统计 ===")
+                    output.lines().filter { it.contains(":") }.forEach { sb.appendLine(it.trim()) }
+                    statusText.text = sb.toString()
+                }
             } catch (e: Exception) {
-                handler.post { sb.appendLine("错误: ${e.message}"); statusText.text = sb.toString() }
+                handler.post {
+                    sb.appendLine("错误: ${e.message}")
+                    statusText.text = sb.toString()
+                }
             }
         }.start()
     }
