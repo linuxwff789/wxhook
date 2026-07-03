@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:name=".App"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MaterialComponents.Light.DarkActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity android:name=".ui.status.StatusActivity" />
+        <activity android:name=".ui.chatlist.ChatListActivity" />
+        <activity android:name=".ui.chatdetail.ChatDetailActivity" />
+        <activity android:name=".ui.search.SearchActivity" />
+        <activity android:name=".ui.backup.BackupActivity" />
+        <activity android:name=".ui.merge.MergeActivity" />
+        <activity android:name=".ui.settings.SettingsActivity" />
+
+        <receiver
+            android:name=".receiver.MessageReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.nous.wxhook.MESSAGE" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".receiver.KeyReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.nous.wxhook.KEY_CAPTURED" />
+            </intent-filter>
+        </receiver>
+
+        <provider
+            android:name=".db.WxHookProvider"
+            android:authorities="com.nous.wxhook.provider"
+            android:exported="false" />
+
+    </application>
+
+</manifest>
