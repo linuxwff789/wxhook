@@ -79,7 +79,7 @@ class DecryptService : Service() {
                 File(sqlFile).writeText(sql)
                 runSu("chmod 666 $sqlFile")
 
-                val output = runSu("/data/local/sqlcipher $localDb < $sqlFile 2>&1")
+                val output = runSu("LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib /data/local/sqlcipher $localDb < $sqlFile 2>&1")
                 runSu("rm $sqlFile")
 
                 // Parse results
