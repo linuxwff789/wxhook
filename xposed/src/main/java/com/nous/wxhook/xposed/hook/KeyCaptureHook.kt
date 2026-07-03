@@ -17,7 +17,6 @@ object KeyCaptureHook {
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         val loader = lpparam.classLoader
 
-        // Hook Application.attach — fires after class loader is ready
         XposedBridge.hookAllMethods(
             android.app.Application::class.java,
             "attach",
@@ -25,14 +24,13 @@ object KeyCaptureHook {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val ctx = param.args[0] as? Context ?: return
 
-                    // Try to hook Database.setCipherKey using ctx.classLoader
+                    // Try to hook Database.setCipherKey
                     try {
                         val dbClass = ctx.classLoader!!.loadClass("com.tencent.wcdb.core.Database")
 
                         var hooked = 0
                         for (m in dbClass.declaredMethods) {
                             if (m.name == "setCipherKey") {
-                                val sig = m.parameterTypes.joinToString { it.simpleName }
                                 XposedBridge.hookMethod(m, object : XC_MethodHook() {
                                     override fun beforeHookedMethod(param: MethodHookParam) {
                                         if (keyCaptured) return
@@ -52,19 +50,14 @@ object KeyCaptureHook {
                                     }
                                 })
                                 hooked++
-                                XposedBridge.log("$TAG HOOK setCipherKey($sig)")
                             }
                         }
                         XposedBridge.log("$TAG hooks installed: $hooked overloads")
 
                     } catch (e: Throwable) {
-                        // Tinker: class not found, use known key
                         XposedBridge.log("$TAG Database class not found (Tinker), using known key")
                         saveKey(ctx, KNOWN_KEY, "1024", "3")
                     }
-
-                    // Also read from /data/local/tmp/.wechat_key if exists
-                    readKeyFromFile(ctx)
                 }
             }
         )
@@ -76,54 +69,40 @@ object KeyCaptureHook {
                 "yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA
             ).format(System.currentTimeMillis())
 
-            // Write to /data/local/tmp/.wechat_key (world-readable)
+            // 1. Save to WeChat's own shared_prefs (XP module can write here)
             try {
-                val keyFile = java.io.File("/data/local/tmp/.wechat_key")
-                keyFile.writeText(
-                    "key=$keyHex\npageSize=$pageSize\nversion=$version\ntime=$now\n"
-                )
-                // Make it world-readable
-                keyFile.setReadable(true, false)
-                keyFile.setWritable(true, false)
-                XposedBridge.log("$TAG wrote /data/local/tmp/.wechat_key")
+                val prefs = ctx.getSharedPreferences("wxhook_key", Context.MODE_PRIVATE)
+                prefs.edit()
+                    .putString("key", keyHex)
+                    .putString("page_size", pageSize)
+                    .putString("version", version)
+                    .putString("time", now)
+                    .apply()
+                XposedBridge.log("$TAG saved to WeChat shared_prefs")
             } catch (e: Throwable) {
-                XposedBridge.log("$TAG write .wechat_key failed: ${e.message}")
+                XposedBridge.log("$TAG save to WeChat prefs failed: ${e.message}")
             }
 
-            // Also write to wxhook app's shared_prefs via shell
+            // 2. Broadcast key to wxhook app
             try {
-                val prefsDir = "/data/data/com.nous.wxhook/shared_prefs"
-                val prefsFile = "$prefsDir/wxhook.xml"
-                val xml = """<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
-<map>
-    <string name="last_key">$keyHex</string>
-    <int name="last_key_len" value="${keyHex.length / 2}" />
-    <long name="last_key_time" value="${System.currentTimeMillis()}" />
-</map>"""
-                Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $prefsDir && cat > $prefsFile << 'PREFS_EOF'\n$xml\nPREFS_EOF && chmod 660 $prefsFile && chown 10281:10281 $prefsFile && chown 10281:10281 $prefsDir")).waitFor()
-                XposedBridge.log("$TAG wrote wxhook shared_prefs")
+                val intent = Intent("com.nous.wxhook.KEY_CAPTURED").apply {
+                    putExtra("key", keyHex)
+                    putExtra("keyLen", keyHex.length / 2)
+                    putExtra("pageSize", pageSize)
+                    putExtra("version", version)
+                    putExtra("time", now)
+                    setPackage("com.nous.wxhook")
+                }
+                ctx.sendBroadcast(intent)
+                XposedBridge.log("$TAG broadcast sent to wxhook")
             } catch (e: Throwable) {
-                XposedBridge.log("$TAG write wxhook prefs failed: ${e.message}")
+                XposedBridge.log("$TAG broadcast failed: ${e.message}")
             }
 
             XposedBridge.log("$TAG KEY_CAPTURED key=$keyHex pageSize=$pageSize version=$version")
         } catch (e: Throwable) {
             XposedBridge.log("$TAG saveKey failed: ${e.message}")
         }
-    }
-
-    private fun readKeyFromFile(ctx: Context) {
-        try {
-            val keyFile = java.io.File("/data/local/tmp/.wechat_key")
-            if (keyFile.exists()) {
-                val content = keyFile.readText()
-                val key = content.lines().find { it.startsWith("key=") }?.removePrefix("key=")
-                if (!key.isNullOrEmpty() && !keyCaptured) {
-                    saveKey(ctx, key, "1024", "3")
-                    keyCaptured = true
-                }
-            }
-        } catch (_: Throwable) {}
     }
 
     fun getLastKey(): String? {

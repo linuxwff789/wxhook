@@ -43,7 +43,7 @@
 
         <receiver
             android:name=".receiver.KeyReceiver"
-            android:exported="false">
+            android:exported="true">
             <intent-filter>
                 <action android:name="com.nous.wxhook.KEY_CAPTURED" />
             </intent-filter>
