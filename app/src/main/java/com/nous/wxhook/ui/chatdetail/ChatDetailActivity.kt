@@ -18,13 +18,16 @@ class ChatDetailActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var contentText: TextView
     private var talker: String = ""
+    private var nickname: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         talker = intent.getStringExtra("talker") ?: ""
+        nickname = intent.getStringExtra("nickname") ?: talker
         val scrollView = ScrollView(this)
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 48, 48, 48) }
-        layout.addView(TextView(this).apply { text = "聊天: $talker"; textSize = 20f })
+        layout.addView(TextView(this).apply { text = nickname; textSize = 20f })
+        layout.addView(TextView(this).apply { text = talker; textSize = 12f; setPadding(0, 8, 0, 0) })
         contentText = TextView(this).apply { text = "加载中..."; textSize = 12f; setPadding(0, 32, 0, 0) }
         layout.addView(contentText)
         scrollView.addView(layout)
@@ -45,10 +48,12 @@ class ChatDetailActivity : Activity() {
                     .lines().find { it.startsWith("key=") }?.removePrefix("key=")
                 if (hex != null) key = hex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
             } catch (_: Exception) {}
-            if (key == null) { handler.post { contentText.text = "未捕获密钥" }; return@Thread }
+            if (key == null) { handler.post { contentText.text = "未捕获密钥" }
+                return@Thread }
 
             val dbPath = "/sdcard/Download/EnMicroMsg.db"
-            if (!File(dbPath).exists()) { handler.post { contentText.text = "数据库不存在" }; return@Thread }
+            if (!File(dbPath).exists()) { handler.post { contentText.text = "数据库不存在" }
+                return@Thread }
 
             val sqlFile = "/data/data/com.nous.wxhook/cache/q_${UUID.randomUUID()}.sql"
             try {

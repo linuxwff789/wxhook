@@ -50,10 +50,12 @@ class SearchActivity : Activity() {
                     .lines().find { it.startsWith("key=") }?.removePrefix("key=")
                 if (hex != null) key = hex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
             } catch (_: Exception) {}
-            if (key == null) { handler.post { resultText.text = "未捕获密钥" }; return@Thread }
+            if (key == null) { handler.post { resultText.text = "未捕获密钥" }
+                return@Thread }
 
             val dbPath = "/sdcard/Download/EnMicroMsg.db"
-            if (!File(dbPath).exists()) { handler.post { resultText.text = "数据库不存在" }; return@Thread }
+            if (!File(dbPath).exists()) { handler.post { resultText.text = "数据库不存在" }
+                return@Thread }
 
             val sqlFile = "/data/data/com.nous.wxhook/cache/q_${UUID.randomUUID()}.sql"
             try {
