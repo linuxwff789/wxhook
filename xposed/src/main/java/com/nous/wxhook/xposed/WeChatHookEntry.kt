@@ -14,7 +14,7 @@ class WeChatHookEntry : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != "com.tencent.mm") return
 
-        XposedBridge.log("[wxhook] loaded in WeChat ${lpparam.appInfo?.versionName}")
+        XposedBridge.log("[wxhook] loaded in WeChat (pid=${android.os.Process.myPid()})")
 
         // Hook 密钥捕获
         KeyCaptureHook.hook(lpparam)
