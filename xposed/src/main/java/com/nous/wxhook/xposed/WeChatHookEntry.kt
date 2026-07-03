@@ -5,6 +5,9 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import com.nous.wxhook.xposed.hook.KeyCaptureHook
+import com.nous.wxhook.xposed.hook.MessageHook
+import com.nous.wxhook.xposed.hook.AntiRecallHook
 
 class WeChatHookEntry : IXposedHookLoadPackage {
 
