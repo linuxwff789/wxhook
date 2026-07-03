@@ -46,36 +46,24 @@ class StatusActivity : Activity() {
     private fun checkStatus() {
         val sb = StringBuilder()
 
-        // Try to read key from multiple sources
         var lastKey: String? = null
         var lastKeyTime: Long = 0
 
-        // Source 1: /data/local/tmp/.wechat_key (written by XP module)
+        // Source 1: WeChat's shared_prefs via root (XP module writes here)
         try {
-            val keyFile = File("/data/local/tmp/.wechat_key")
-            if (keyFile.exists()) {
-                val content = keyFile.readText()
-                lastKey = content.lines().find { it.startsWith("key=") }?.removePrefix("key=")
-                lastKeyTime = System.currentTimeMillis()
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /data/data/com.tencent.mm/shared_prefs/wechat_key.xml"))
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor()
+            if (output.contains("key")) {
+                val match = Regex("name=\"key\">([^<]+)<").find(output)
+                if (match != null) {
+                    lastKey = match.groupValues[1]
+                    lastKeyTime = System.currentTimeMillis()
+                }
             }
         } catch (_: Exception) {}
 
-        // Source 2: WeChat's shared_prefs (XP module writes here)
-        if (lastKey == null) {
-            try {
-                val prefsFile = File("/data/data/com.tencent.mm/shared_prefs/wechat_key.xml")
-                if (prefsFile.exists()) {
-                    val content = prefsFile.readText()
-                    val match = Regex("name=\"key\">([^<]+)<").find(content)
-                    if (match != null) {
-                        lastKey = match.groupValues[1]
-                        lastKeyTime = System.currentTimeMillis()
-                    }
-                }
-            } catch (_: Exception) {}
-        }
-
-        // Source 3: wxhook's own shared_prefs (fallback)
+        // Source 2: wxhook's own shared_prefs
         if (lastKey == null) {
             try {
                 val prefs = getSharedPreferences("wxhook", MODE_PRIVATE)
