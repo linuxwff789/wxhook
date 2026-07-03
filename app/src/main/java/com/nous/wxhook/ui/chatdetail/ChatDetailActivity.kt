@@ -209,7 +209,6 @@ class MessageAdapter(
                     if (execCmd("test -f '$full' && echo 1").contains("1")) {
                         val cacheName = if (isEnc) "dec_$md5.jpg" else name
                         val cacheFile = File(cacheDir, cacheName)
-                        if (cacheFile.exists()) { localPath = cacheFile.absolutePath; break }
                         if (isEnc) {
                             localPath = decryptWxgf(full, cacheFile)
                         } else {
@@ -226,6 +225,7 @@ class MessageAdapter(
                 }
 
                 val bm = BitmapFactory.decodeFile(localPath)
+                android.util.Log.i("wxhook:Img","decodeFile=$localPath size=${File(localPath).length()} bm=${bm != null}")
                 handler.post {
                     if (bm != null) {
                         tv.visibility = View.GONE
