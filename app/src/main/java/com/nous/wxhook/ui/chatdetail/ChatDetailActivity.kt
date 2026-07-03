@@ -189,69 +189,46 @@ class MessageAdapter(
 
     private fun buildAndAddContent(vert: LinearLayout, ctx: android.content.Context, msg: ChatMessage, parsed: MessageParser.ParsedMessage) {
         val tv = TextView(ctx).apply { textSize = 14f; setTextColor(0xDE000000.toInt()); setPadding(0, 8, 0, 0) }
-        val ctx2 = ctx
 
         when (msg.type) {
             1 -> tv.text = parsed.content ?: "(空)"
-            3 -> { // image — check file
-                val wxPath = resolveWxPath(msg.imgPath, 3)
-                val exists = wxPath != null && fileExists(wxPath)
+            3 -> { // image — show placeholder, check file async
                 tv.text = buildString {
-                    appendLine("[图片]")
-                    if (wxPath != null) appendLine("  路径: ${wxPath.takeLast(60)}")
-                    if (exists) appendLine("  ✅ 文件存在 (${fileSizeStr(wxPath!!)}) — 点此查看")
-                    else appendLine("  ⚠️ 图片文件已丢失 (仅CDN链接)")
+                    append("[图片]")
+                    append("\n  ⏳ 检查文件...")
                 }
-                tv.setTextColor(if (exists) 0xFF6200EE.toInt() else 0x8A000000.toInt())
-                if (exists) tv.setOnClickListener {
-                    val local = copyToCache(wxPath!!)
-                    if (local != null) openFile(ctx2, File(local))
-                    else Toast.makeText(ctx2, "复制失败", Toast.LENGTH_SHORT).show()
-                }
+                tv.setTextColor(0xFF6200EE.toInt())
+                checkFileAsync(ctx, msg, 3, tv)
             }
-            34 -> { // voice — check file
-                val wxPath = resolveWxPath(msg.imgPath, 34)
-                val exists = wxPath != null && fileExists(wxPath)
-                tv.text = buildString {
-                    val extra = parsed.mediaPath?.let { "(${it}ms)" } ?: ""
-                    appendLine("[语音] $extra")
-                    if (exists) appendLine("  ✅ 文件存在 — 点此播放") else appendLine("  ⚠️ 语音文件已丢失")
-                }
-                tv.setTextColor(if (exists) 0xFF6200EE.toInt() else 0x8A000000.toInt())
+            34 -> { // voice
+                tv.text = "[语音] ${parsed.mediaPath?.let { "(${it}ms)" } ?: ""}\n  ⏳ 检查文件..."
+                tv.setTextColor(0xFF6200EE.toInt())
+                checkFileAsync(ctx, msg, 34, tv)
             }
             43 -> { // video
-                val wxPath = resolveWxPath(msg.imgPath, 43)
-                val exists = wxPath != null && fileExists(wxPath)
-                tv.text = buildString {
-                    appendLine("[视频]")
-                    if (exists) appendLine("  ✅ 文件存在 — 点此查看") else appendLine("  ⚠️ 视频文件已丢失")
-                }
-                tv.setTextColor(if (exists) 0xFF6200EE.toInt() else 0x8A000000.toInt())
+                tv.text = "[视频]\n  ⏳ 检查文件..."
+                tv.setTextColor(0xFF6200EE.toInt())
+                checkFileAsync(ctx, msg, 43, tv)
             }
             47 -> tv.text = "[表情] ${parsed.content?.take(100) ?: ""}"
             48 -> { tv.text = "[位置] ${parsed.content?.take(100) ?: ""}"; tv.setTextColor(0xFF6200EE.toInt()) }
             42 -> { tv.text = "[名片] ${parsed.content?.take(100) ?: ""}"; tv.setTextColor(0xFF6200EE.toInt()) }
-            49 -> { // app messages
+            49 -> {
                 when (parsed.subType) {
                     MessageParser.APP_LINK -> {
                         tv.text = buildString { parsed.title?.let { appendLine(it) }; parsed.url?.take(80)?.let { appendLine(it) }; append(parsed.content?.take(200) ?: "") }
                         tv.setTextColor(0xFF6200EE.toInt())
                         parsed.url?.takeUnless { it.isBlank() }?.let { url ->
                             tv.setOnClickListener {
-                                try { ctx2.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                                catch (e: Exception) { Toast.makeText(ctx2, "无法打开链接", Toast.LENGTH_SHORT).show() }
+                                try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                                catch (e: Exception) { Toast.makeText(ctx, "无法打开链接", Toast.LENGTH_SHORT).show() }
                             }
                         }
                     }
                     MessageParser.APP_FILE -> {
-                        val name = parsed.fileName?.take(50) ?: "未知文件"
-                        tv.text = "[文件] $name"
+                        tv.text = "[文件] ${parsed.fileName?.take(50) ?: "未知文件"}\n  ⏳ 检查文件..."
                         tv.setTextColor(0xFF6200EE.toInt())
-                        // Try to locate file in WeChat attachment dir
-                        val wxPath = resolveWxPath(msg.imgPath, 0)
-                        val exists = wxPath != null && fileExists(wxPath)
-                        if (exists) { tv.append("\n  ✅ 点此打开"); tv.setOnClickListener { openFile(ctx2, File(wxPath!!)) } }
-                        else tv.append("\n  ⚠️ 文件已丢失 (仅CDN链接)")
+                        checkFileAsync(ctx, msg, 0, tv)
                     }
                     MessageParser.APP_MINI_PROGRAM -> tv.text = "[小程序] ${parsed.title?.take(50) ?: ""}"
                     MessageParser.APP_MERGE_FORWARD -> tv.text = "[合并转发]"
@@ -264,6 +241,27 @@ class MessageAdapter(
             else -> { val r = msg.content?.take(300) ?: ""; tv.text = r.ifEmpty { "(类型${msg.type} 暂未解析)" }; tv.setTextColor(0x8A000000.toInt()) }
         }
         if (tv.text.isNotBlank()) vert.addView(tv)
+    }
+
+    private fun checkFileAsync(ctx: android.content.Context, msg: ChatMessage, fileType: Int, tv: TextView) {
+        Thread {
+            val wxPath = resolveWxPath(msg.imgPath, fileType)
+            val exists = wxPath != null && fileExists(wxPath)
+            val sizeStr = if (exists) fileSizeStr(wxPath!!) else ""
+            (tv.context as? android.app.Activity)?.runOnUiThread {
+                val extra = when {
+                    exists -> "\n  ✅ 文件存在 (${sizeStr}) — 点此打开"
+                    wxPath == null -> "\n  ⚠️ 需微信运行中才能检查"
+                    else -> "\n  ⚠️ 文件已丢失 (仅CDN)"
+                }
+                tv.append(extra)
+                if (exists) tv.setOnClickListener {
+                    val local = copyToCache(wxPath!!)
+                    if (local != null) openFile(ctx, File(local))
+                    else Toast.makeText(ctx, "复制失败", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
     }
 
     private fun fileSizeStr(path: String): String {
