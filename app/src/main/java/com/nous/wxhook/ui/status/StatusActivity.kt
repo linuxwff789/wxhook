@@ -17,11 +17,6 @@ class StatusActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var statusText: TextView
 
-    // Known key from Frida exploration
-    companion object {
-        const val KNOWN_KEY = "e9cd2ae"
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -30,11 +25,10 @@ class StatusActivity : Activity() {
             setPadding(48, 48, 48, 48)
         }
 
-        val title = TextView(this).apply {
+        layout.addView(TextView(this).apply {
             text = "wxhook 状态检测"
             textSize = 20f
-        }
-        layout.addView(title)
+        })
 
         statusText = TextView(this).apply {
             text = "检测中..."
@@ -44,73 +38,79 @@ class StatusActivity : Activity() {
         layout.addView(statusText)
 
         setContentView(layout)
-
         handler.post { checkStatus() }
     }
 
     private fun checkStatus() {
         val sb = StringBuilder()
-
-        // Try to read key from shared_prefs, fallback to known key
         var lastKey: String? = null
+
+        // Read key from WeChat's shared_prefs via /proc/PID/root
         try {
-            val prefs = getSharedPreferences("wxhook", MODE_PRIVATE)
-            lastKey = prefs.getString("last_key", null)
+            val pid = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
+                .inputStream.bufferedReader().readText().trim().split("\n").firstOrNull()
+            if (pid != null && pid.isNotEmpty()) {
+                val procPath = "/proc/$pid/root/data/data/com.tencent.mm/shared_prefs/wxhook_key.xml"
+                val content = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $procPath"))
+                    .inputStream.bufferedReader().readText()
+                val match = Regex("name=\"key\">([^<]+)<").find(content)
+                if (match != null) {
+                    // Convert hex bytes to ASCII
+                    val hex = match.groupValues[1]
+                    lastKey = hex.chunked(2).map { it.toInt(16).toChar() }.joinToString("")
+                }
+            }
         } catch (_: Exception) {}
 
-        // Fallback to known key
+        // Fallback: read from wxhook shared_prefs
         if (lastKey == null) {
-            lastKey = KNOWN_KEY
-            // Save it for future use
             try {
-                getSharedPreferences("wxhook", MODE_PRIVATE).edit()
-                    .putString("last_key", KNOWN_KEY)
-                    .putInt("last_key_len", 7)
-                    .putLong("last_key_time", System.currentTimeMillis())
-                    .apply()
+                val prefs = getSharedPreferences("wxhook", MODE_PRIVATE)
+                lastKey = prefs.getString("last_key", null)
             } catch (_: Exception) {}
         }
 
         sb.appendLine("=== XP 模块状态 ===")
-        sb.appendLine("密钥: ✓ $lastKey")
-        sb.appendLine("来源: 已知密钥 (Frida 抓取)")
+        if (lastKey != null) {
+            sb.appendLine("密钥: ✓ $lastKey")
+            // Save to shared_prefs for other pages
+            getSharedPreferences("wxhook", MODE_PRIVATE).edit()
+                .putString("last_key", lastKey)
+                .putInt("last_key_len", lastKey.length)
+                .putLong("last_key_time", System.currentTimeMillis())
+                .apply()
+        } else {
+            sb.appendLine("密钥: ✗ 未捕获")
+        }
 
         sb.appendLine("\n=== 数据库状态 ===")
-
         val dbPath = "/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3/EnMicroMsg.db"
         val dbFile = File(dbPath)
         if (dbFile.exists()) {
             sb.appendLine("数据库: ✓ 存在 (${dbFile.length() / 1024 / 1024} MB)")
-            sb.appendLine("尝试解密...")
-
-            Thread {
-                try {
-                    val db = WeChatDbDecryptor.openDecryptedDb(dbPath)
-                    if (db != null) {
-                        val stats = WeChatDbDecryptor.getStats(db)
-                        handler.post {
-                            sb.appendLine("\n=== 解密统计 ===")
-                            stats.forEach { (table, count) ->
-                                sb.appendLine("$table: $count 条")
+            if (lastKey != null) {
+                sb.appendLine("尝试解密...")
+                Thread {
+                    try {
+                        val db = WeChatDbDecryptor.openDecryptedDb(dbPath)
+                        if (db != null) {
+                            val stats = WeChatDbDecryptor.getStats(db)
+                            handler.post {
+                                sb.appendLine("\n=== 解密统计 ===")
+                                stats.forEach { (table, count) -> sb.appendLine("$table: $count 条") }
+                                statusText.text = sb.toString()
                             }
-                            statusText.text = sb.toString()
+                            db.close()
+                        } else {
+                            handler.post { sb.appendLine("解密失败"); statusText.text = sb.toString() }
                         }
-                        db.close()
-                    } else {
-                        handler.post {
-                            sb.appendLine("解密失败")
-                            statusText.text = sb.toString()
-                        }
+                    } catch (e: Exception) {
+                        handler.post { sb.appendLine("解密错误: ${e.message}"); statusText.text = sb.toString() }
                     }
-                } catch (e: Exception) {
-                    handler.post {
-                        sb.appendLine("解密错误: ${e.message}")
-                        statusText.text = sb.toString()
-                    }
-                }
-            }.start()
+                }.start()
+            }
         } else {
-            sb.appendLine("数据库: ✗ 文件不存在（需要 root）")
+            sb.appendLine("数据库: ✗ 不存在")
             statusText.text = sb.toString()
         }
     }
