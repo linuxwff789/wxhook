@@ -58,5 +58,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     // SQLCipher for WeChat DB decryption
-    implementation("net.zetetic:android-database-sqlcipher:4.5.6")
+    // TODO: find correct Maven coordinates or add custom repository
+    // implementation("net.zetetic:android-database-sqlcipher:4.5.6")
 }
