@@ -182,36 +182,63 @@ class MessageAdapter(
 
     // ── Image ──
     private fun addImage(vert: LinearLayout, ctx: android.content.Context, msg: ChatMessage) {
-        // Placeholder while loading
         val tv = TextView(ctx).apply { text = "  ⏳ 加载图片..."; textSize = 13f; setTextColor(0x8A000000.toInt()); setPadding(0, 8, 0, 0) }
         vert.addView(tv)
-        // Also add an ImageView (hidden until loaded)
         val iv = ImageView(ctx).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 400)
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            visibility = View.GONE
+            scaleType = ImageView.ScaleType.FIT_CENTER; visibility = View.GONE
         }
         vert.addView(iv)
 
         Thread {
-            val wxPath = resolveWxPath(msg.imgPath, 3)
-            val exists = wxPath != null && fileExists(wxPath)
-            val local = if (exists) copyToCache(wxPath!!) else null
-            handler.post {
-                tv.visibility = View.GONE
-                if (local != null) {
-                    val bm = BitmapFactory.decodeFile(local)
-                    if (bm != null) { iv.setImageBitmap(bm); iv.visibility = View.VISIBLE; iv.setOnClickListener { openFile(ctx, local) } }
-                    else { tv.text = "  ⚠️ 图片解码失败"; tv.visibility = View.VISIBLE }
-                } else {
-                    tv.text = if (wxPath == null) "  ⚠️ 需微信运行" else "  ⚠️ 图片已丢失"
-                    tv.visibility = View.VISIBLE
+            try {
+                val md5 = msg.imgPath?.substringAfter("th_")?.substringBefore("|")?.take(32) ?: ""
+                if (md5.length < 32) { handler.post { tv.text = "  ⚠️ 无效图片路径"; tv.visibility = View.VISIBLE }; return@Thread }
+
+                val wpid = execCmd("pidof com.tencent.mm")
+                if (wpid.isBlank()) { handler.post { tv.text = "  ⚠️ 需微信运行中才能加载图片"; tv.visibility = View.VISIBLE }; return@Thread }
+
+                val base = "/proc/${wpid}/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
+                // Try thumbnail first, then fallback to hd, then original
+                val candidates = listOf(
+                    "$base/image2/${md5.substring(0,2)}/${md5.substring(2,4)}/th_$md5",
+                    "$base/image2/${md5.substring(0,2)}/${md5.substring(2,4)}/th_${md5}hd",
+                    "$base/image2/${md5.substring(0,2)}/${md5.substring(2,4)}/$md5.jpg"
+                )
+                var localPath: String? = null
+                for (path in candidates) {
+                    if (execCmd("test -f '$path' && head -c 2 '$path' | xxd -p").contains("ffd8")) {
+                        localPath = copyToCache(path)
+                        if (localPath != null) break
+                    }
                 }
+
+                if (localPath == null) {
+                    // Check if encrypted file exists
+                    val encPath = candidates.lastOrNull { execCmd("test -f '$it' && echo 1").contains("1") }
+                    handler.post {
+                        tv.text = if (encPath != null) "  🔒 图片已加密（wxgf格式）" else "  ⚠️ 图片已丢失"
+                        tv.visibility = View.VISIBLE
+                    }
+                    return@Thread
+                }
+
+                val bm = BitmapFactory.decodeFile(localPath)
+                handler.post {
+                    if (bm != null) {
+                        tv.visibility = View.GONE
+                        iv.setImageBitmap(bm); iv.visibility = View.VISIBLE
+                        iv.setOnClickListener { openFile(ctx, localPath!!) }
+                    } else {
+                        tv.text = "  ⚠️ 图片解码失败（文件损坏或格式不支持）"; tv.visibility = View.VISIBLE
+                    }
+                }
+            } catch (e: Exception) {
+                handler.post { tv.text = "  ⚠️ 图片加载异常: ${e.message.take(50)}"; tv.visibility = View.VISIBLE }
             }
         }.start()
     }
 
-    // ── Video ──
     private fun addVideo(vert: LinearLayout, ctx: android.content.Context, msg: ChatMessage) {
         val tv = TextView(ctx).apply {
             text = "  🎬 [视频]  ⏳ 检查文件..."; textSize = 14f
@@ -219,21 +246,24 @@ class MessageAdapter(
         }
         vert.addView(tv)
         Thread {
-            val wxPath = resolveWxPath(msg.imgPath, 43)
-            val exists = wxPath != null && fileExists(wxPath)
-            val local = if (exists) copyToCache(wxPath!!) else null
-            handler.post {
-                if (local != null) {
-                    tv.text = "  ▶️ [视频]  ${wxPath!!.substringAfterLast("/").take(40)}\n  👆 点击播放"
-                    tv.setOnClickListener { openFile(ctx, local) }
-                } else {
-                    tv.text = if (wxPath == null) "  🎬 [视频]\n  ⚠️ 需微信运行" else "  🎬 [视频]\n  ⚠️ 视频文件已丢失"
+            try {
+                val md5 = msg.imgPath?.substringAfter("th_")?.substringBefore("|")?.take(32) ?: ""
+                if (md5.length < 32) { handler.post { tv.text = "  🎬 [视频]\n  ⚠️ 无效路径" }; return@Thread }
+                val wpid = execCmd("pidof com.tencent.mm")
+                if (wpid.isBlank()) { handler.post { tv.text = "  🎬 [视频]\n  ⚠️ 需微信运行"; return@Thread } }
+                val base = "/proc/${wpid}/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
+                val vPath = "$base/video/$md5"
+                val local = if (execCmd("test -f '$vPath' && echo 1").contains("1")) copyToCache(vPath) else null
+                handler.post {
+                    if (local != null) {
+                        tv.text = "  ▶️ [视频]  ${md5.take(16)}…\n  👆 点击播放"
+                        tv.setOnClickListener { openFile(ctx, local) }
+                    } else { tv.text = "  🎬 [视频]\n  ⚠️ 视频文件已丢失" }
                 }
-            }
+            } catch (_: Exception) { handler.post { tv.text = "  🎬 [视频]\n  ⚠️ 检查异常" } }
         }.start()
     }
 
-    // ── Voice ──
     private fun addVoice(vert: LinearLayout, ctx: android.content.Context, msg: ChatMessage) {
         val parsed = MessageParser.parse(msg.type, msg.content, 0)
         val tv = TextView(ctx).apply {
@@ -242,17 +272,21 @@ class MessageAdapter(
         }
         vert.addView(tv)
         Thread {
-            val wxPath = resolveWxPath(msg.imgPath, 34)
-            val exists = wxPath != null && fileExists(wxPath)
-            val local = if (exists) copyToCache(wxPath!!) else null
-            handler.post {
-                if (local != null) {
-                    tv.text = "  🎵 [语音] ${parsed.mediaPath?.let { "(${it}ms)" } ?: ""}\n  👆 点击播放"
-                    tv.setOnClickListener { openFile(ctx, local) }
-                } else {
-                    tv.text = "  🎵 [语音] \n  ${if(wxPath==null)"⚠️ 需微信运行" else "⚠️ 语音文件已丢失"}"
+            try {
+                val md5 = msg.imgPath?.substringAfter("th_")?.substringBefore("|")?.take(32) ?: ""
+                if (md5.length < 32) { handler.post { tv.text = "  🎵 [语音]\n  ⚠️ 无文件"; return@Thread } }
+                val wpid = execCmd("pidof com.tencent.mm")
+                if (wpid.isBlank()) { handler.post { tv.text = "  🎵 [语音]\n  ⚠️ 需微信运行"; return@Thread } }
+                val base = "/proc/${wpid}/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
+                val vPath = "$base/voice2/${md5.substring(0,2)}/msg_$md5.amr"
+                val local = if (execCmd("test -f '$vPath' && echo 1").contains("1")) copyToCache(vPath) else null
+                handler.post {
+                    if (local != null) {
+                        tv.text = "  🎵 [语音] ${parsed.mediaPath?.let { "(${it}ms)" } ?: ""}\n  👆 点击播放"
+                        tv.setOnClickListener { openFile(ctx, local) }
+                    } else { tv.text = "  🎵 [语音]\n  ⚠️ 语音文件已丢失" }
                 }
-            }
+            } catch (_: Exception) { handler.post { tv.text = "  🎵 [语音]\n  ⚠️ 检查异常" } }
         }.start()
     }
 
