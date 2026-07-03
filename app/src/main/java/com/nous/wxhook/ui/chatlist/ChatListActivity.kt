@@ -14,7 +14,7 @@ import java.io.File
 
 class ChatListActivity : Activity() {
 
-    private val handler = Handler(Looper.getMainLooper>())
+    private val handler = Handler(Looper.getMainLooper()
     private lateinit var contentText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
