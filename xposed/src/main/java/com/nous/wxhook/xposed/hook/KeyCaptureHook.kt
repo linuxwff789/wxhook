@@ -12,13 +12,17 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage
 object KeyCaptureHook {
 
     private const val TAG = "[wxhook:Key]"
-    private const val KNOWN_KEY = "e9cd2ae"
     private const val PROVIDER_URI = "content://com.nous.wxhook.provider/key"
     private var keyCaptured = false
+
+    // JNI native methods (from libwcdbhook.so)
+    private external fun nativeHello(): String
+    private external fun nativeInstallHooks(): String
 
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         val loader = lpparam.classLoader
 
+        // Hook Application.attach — fires after class loader is ready
         XposedBridge.hookAllMethods(
             android.app.Application::class.java,
             "attach",
@@ -26,7 +30,24 @@ object KeyCaptureHook {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val ctx = param.args[0] as? Context ?: return
 
-                    // Try to hook Database.setCipherKey
+                    // 1. Load native hook library (early hook)
+                    try {
+                        val pkgMgr = ctx.packageManager
+                        val moduleInfo = pkgMgr.getApplicationInfo("com.nous.wxhook.xposed", 0)
+                        val loadPath = moduleInfo.nativeLibraryDir + "/libwcdbhook.so"
+                        if (java.io.File(loadPath).exists()) {
+                            System.load(loadPath)
+                            val hello = nativeHello()
+                            val status = nativeInstallHooks()
+                            XposedBridge.log("$TAG NATIVE loaded: hello=$hello status=$status")
+                        } else {
+                            XposedBridge.log("$TAG NATIVE not found: $loadPath")
+                        }
+                    } catch (e: Throwable) {
+                        XposedBridge.log("$TAG NATIVE load failed: ${e.message}")
+                    }
+
+                    // 2. Java hook: Database.setCipherKey
                     try {
                         val dbClass = ctx.classLoader!!.loadClass("com.tencent.wcdb.core.Database")
 
@@ -54,11 +75,10 @@ object KeyCaptureHook {
                                 hooked++
                             }
                         }
-                        XposedBridge.log("$TAG hooks installed: $hooked overloads")
+                        XposedBridge.log("$TAG Java hooks installed: $hooked overloads")
 
                     } catch (e: Throwable) {
-                        XposedBridge.log("$TAG Database class not found (Tinker), using known key")
-                        pushKey(ctx, KNOWN_KEY, "1024", "3")
+                        XposedBridge.log("$TAG Database class not found: ${e.message}")
                     }
                 }
             }
@@ -70,7 +90,21 @@ object KeyCaptureHook {
             "yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA
         ).format(System.currentTimeMillis())
 
-        // Method 1: ContentProvider (most reliable across processes)
+        // Save to WeChat's shared_prefs (XP module can write here)
+        try {
+            val prefs = ctx.getSharedPreferences("wxhook_key", Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString("key", keyHex)
+                .putString("page_size", pageSize)
+                .putString("version", version)
+                .putString("time", now)
+                .apply()
+            XposedBridge.log("$TAG saved to WeChat shared_prefs")
+        } catch (e: Throwable) {
+            XposedBridge.log("$TAG save prefs failed: ${e.message}")
+        }
+
+        // Try ContentProvider
         try {
             val values = ContentValues().apply {
                 put("key", keyHex)
@@ -79,28 +113,15 @@ object KeyCaptureHook {
                 put("time", now)
             }
             ctx.contentResolver.insert(Uri.parse(PROVIDER_URI), values)
-            XposedBridge.log("$TAG key pushed via ContentProvider: $keyHex")
+            XposedBridge.log("$TAG key pushed via ContentProvider")
         } catch (e: Throwable) {
             XposedBridge.log("$TAG ContentProvider failed: ${e.message}")
-
-            // Method 2: Broadcast fallback (may be blocked by MIUI)
-            try {
-                val intent = android.content.Intent("com.nous.wxhook.KEY_CAPTURED").apply {
-                    putExtra("key", keyHex)
-                    putExtra("keyLen", keyHex.length / 2)
-                    setPackage("com.nous.wxhook")
-                }
-                ctx.sendBroadcast(intent)
-                XposedBridge.log("$TAG broadcast sent as fallback")
-            } catch (e2: Throwable) {
-                XposedBridge.log("$TAG broadcast also failed: ${e2.message}")
-            }
         }
 
         XposedBridge.log("$TAG KEY_CAPTURED key=$keyHex pageSize=$pageSize version=$version")
     }
 
     fun getLastKey(): String? {
-        return if (keyCaptured) KNOWN_KEY else null
+        return if (keyCaptured) "captured" else null
     }
 }
