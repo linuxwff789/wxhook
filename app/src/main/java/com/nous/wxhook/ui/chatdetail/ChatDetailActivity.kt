@@ -211,10 +211,9 @@ class MessageAdapter(
                         val cacheFile = File(cacheDir, cacheName)
                         if (cacheFile.exists()) { localPath = cacheFile.absolutePath; break }
                         if (isEnc) {
-                            // Decrypt wxgf
                             localPath = decryptWxgf(full, cacheFile)
                         } else {
-                            if (execCmd("cp '$full' '${cacheFile.absolutePath}' && echo ok").contains("ok"))
+                            if (execCmd("cp '$full' '${cacheFile.absolutePath}' && chmod 644 '${cacheFile.absolutePath}' && echo ok").contains("ok"))
                                 localPath = cacheFile.absolutePath
                         }
                         if (localPath != null) break
@@ -246,7 +245,7 @@ class MessageAdapter(
     private fun decryptWxgf(srcPath: String, dstFile: File): String? {
         return try {
             val tmpFile = File(cacheDir, "tmp_enc_${dstFile.name}")
-            if (!execCmd("cp '$srcPath' '${tmpFile.absolutePath}' && echo ok").contains("ok")) return null
+            if (!execCmd("cp '$srcPath' '${tmpFile.absolutePath}' && chmod 644 '${tmpFile.absolutePath}' && echo ok").contains("ok")) return null
             val encBytes = tmpFile.readBytes(); tmpFile.delete()
             if (encBytes.size < 20) return null
             if (encBytes[0] != 'w'.code.toByte() || encBytes[1] != 'x'.code.toByte()) return null
