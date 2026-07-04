@@ -283,7 +283,7 @@ object MessageParser {
             title = title,
             url = url,
             fileName = fileName
-        )
+        ).also { Log.i("wxhook:Parser","subType=$detectedSubType title=$title file=$fileName") }
     }
 
     /**
