@@ -1,6 +1,7 @@
 package com.nous.wxhook.ui.chatlist
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -8,20 +9,22 @@ import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.cardview.widget.CardView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.card.MaterialCardView
 import com.google.android.material.progressindicator.CircularProgressIndicator
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.*
 
 data class ChatConversation(
     val username: String, val nickname: String,
     val unReadCount: Int, val conversationTime: Long, val typeTag: String
 )
-
 data class SectionItem(val isHeader: Boolean, val title: String = "", val conv: ChatConversation? = null)
 
 class ChatListActivity : AppCompatActivity() {
@@ -32,7 +35,6 @@ class ChatListActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Log.i("wxhook:ChatList","onCreate")
         val root = androidx.constraintlayout.widget.ConstraintLayout(this)
         recyclerView = RecyclerView(this).apply { id = View.generateViewId() }
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -42,7 +44,7 @@ class ChatListActivity : AppCompatActivity() {
             layoutParams = ViewGroup.LayoutParams(96, 96)
         }
         root.addView(recyclerView); root.addView(progressBar); setContentView(root)
-        supportActionBar?.title = "聊天列表"
+        supportActionBar?.title = "消息"
         loadConversations()
     }
 
@@ -71,8 +73,6 @@ class ChatListActivity : AppCompatActivity() {
                         convs.add(ChatConversation(p[0], p[1], p[2].toIntOrNull()?:0, p.getOrNull(3)?.toLongOrNull()?:0L, p[4]))
                 }
                 Log.i("wxhook:ChatList","parsed ${convs.size} conversations")
-
-                // Sort into sections
                 val groups = mutableListOf<SectionItem>()
                 for (type in listOf("contact", "group", "official")) {
                     val items = convs.filter { it.typeTag == type }
@@ -81,8 +81,6 @@ class ChatListActivity : AppCompatActivity() {
                         items.forEach { groups.add(SectionItem(isHeader = false, conv = it)) }
                     }
                 }
-                Log.i("wxhook:ChatList","sections: ${groups.size} items")
-
                 handler.post {
                     progressBar.visibility = View.GONE
                     if (convs.isEmpty()) setContentView(TextView(this).apply { text = "没有会话数据"; textSize = 18f })
@@ -100,7 +98,40 @@ class ChatListActivity : AppCompatActivity() {
     }
 }
 
-// ── Sectioned Adapter ──
+// ── Sectioned Adapter with better visuals ──
+
+val AVATAR_COLORS = intArrayOf(
+    0xFFE91E63.toInt(), 0xFF9C27B0.toInt(), 0xFF673AB7.toInt(), 0xFF3F51B5.toInt(),
+    0xFF2196F3.toInt(), 0xFF009688.toInt(), 0xFF4CAF50.toInt(), 0xFFFF5722.toInt(),
+    0xFF795548.toInt(), 0xFF607D8B.toInt()
+)
+
+private fun avatarColor(name: String): Int {
+    val i = kotlin.math.abs(name.hashCode()) % AVATAR_COLORS.size
+    return AVATAR_COLORS[i]
+}
+
+private fun avatarChar(name: String): String {
+    val c = name.firstOrNull { it.isLetterOrDigit() } ?: '#'
+    return c.toString().uppercase()
+}
+
+private fun formatTime(ts: Long): String {
+    if (ts <= 0) return ""
+    val cal = Calendar.getInstance()
+    val msgCal = Calendar.getInstance().apply { timeInMillis = ts }
+    val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+    return when {
+        cal.get(Calendar.DAY_OF_YEAR) == msgCal.get(Calendar.DAY_OF_YEAR) && cal.get(Calendar.YEAR) == msgCal.get(Calendar.YEAR) ->
+            sdf.format(Date(ts))
+        cal.get(Calendar.DAY_OF_YEAR) - msgCal.get(Calendar.DAY_OF_YEAR) == 1 && cal.get(Calendar.YEAR) == msgCal.get(Calendar.YEAR) ->
+            "昨天 ${sdf.format(Date(ts))}"
+        cal.get(Calendar.YEAR) == msgCal.get(Calendar.YEAR) ->
+            SimpleDateFormat("MM-dd", Locale.getDefault()).format(Date(ts))
+        else ->
+            SimpleDateFormat("yy-MM-dd", Locale.getDefault()).format(Date(ts))
+    }
+}
 
 class SectionAdapter(
     private val items: List<SectionItem>,
@@ -109,21 +140,23 @@ class SectionAdapter(
 
     companion object { const val TYPE_HEADER = 0; const val TYPE_ITEM = 1 }
 
-    override fun getItemViewType(position: Int) = if (items[position].isHeader) TYPE_HEADER else TYPE_ITEM
+    override fun getItemViewType(pos: Int) = if (items[pos].isHeader) TYPE_HEADER else TYPE_ITEM
     override fun getItemCount() = items.size
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
-        return if (viewType == TYPE_HEADER) {
-            val tv = TextView(parent.context).apply {
-                textSize = 14f; setTextColor(0xFF6200EE.toInt())
-                setPadding(48, 24, 48, 12)
-                setBackgroundColor(0xFFF5F5F5.toInt())
+    override fun onCreateViewHolder(parent: ViewGroup, vt: Int): RecyclerView.ViewHolder {
+        val ctx = parent.context
+        return if (vt == TYPE_HEADER) {
+            val tv = TextView(ctx).apply {
+                textSize = 13f; setTextColor(0xFF9E9E9E.toInt())
+                setPadding(72, 20, 24, 8); setBackgroundColor(0xFFF5F5F5.toInt())
             }
             object : RecyclerView.ViewHolder(tv) {}
         } else {
-            val card = MaterialCardView(parent.context).apply {
+            // Better card with avatar + name + time + badge
+            val card = CardView(ctx).apply {
                 layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                radius = 0f; cardElevation = 0.5f; setContentPadding(48, 20, 48, 20)
+                radius = 0f; cardElevation = 0.5f
+                setContentPadding(0, 0, 0, 0); setBackgroundColor(Color.WHITE)
             }
             object : RecyclerView.ViewHolder(card) {}
         }
@@ -136,35 +169,70 @@ class SectionAdapter(
             return
         }
         val conv = item.conv ?: return
-        val card = holder.itemView as MaterialCardView
+        val ctx = holder.itemView.context
+        val card = holder.itemView as CardView
         card.removeAllViews()
 
-        val vert = LinearLayout(card.context).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
-        val topRow = LinearLayout(card.context).apply {
+        val hRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setPadding(16, 12, 16, 12)
         }
-        topRow.addView(TextView(card.context).apply {
+
+        // Avatar circle
+        val avatarFrame = FrameLayout(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams(56, 56)
+        }
+        avatarFrame.addView(TextView(ctx).apply {
+            text = avatarChar(conv.nickname)
+            textSize = 20f; gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setBackgroundColor(avatarColor(conv.nickname))
+        }, FrameLayout.LayoutParams(56, 56).also {
+            // We need a circular shape - use a drawable or just set radius on the view
+            // For simplicity, use a solid square with the char
+        })
+        hRow.addView(avatarFrame)
+
+        // Text area
+        val textArea = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(16, 0, 8, 0) }
+        }
+
+        // Top row: name + time
+        val nameRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        nameRow.addView(TextView(ctx).apply {
             text = conv.nickname; textSize = 16f; setTextColor(0xDE000000.toInt())
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         })
-        topRow.addView(TextView(card.context).apply {
-            text = if (conv.conversationTime > 0L) {
-                java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(conv.conversationTime))
-            } else ""
-            textSize = 12f; setTextColor(0x8A000000.toInt()); gravity = Gravity.END
+        nameRow.addView(TextView(ctx).apply {
+            text = formatTime(conv.conversationTime); textSize = 11f; setTextColor(0x8A000000.toInt())
+            gravity = Gravity.END
         })
-        vert.addView(topRow)
+        textArea.addView(nameRow)
+
+        // Bottom row: type badge + unread
+        val infoRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 4, 0, 0) }
+        infoRow.addView(TextView(ctx).apply {
+            text = when (conv.typeTag) { "group" -> "群聊"; "official" -> "公众号"; else -> "联系人" }
+            textSize = 12f; setTextColor(0xFF9E9E9E.toInt())
+        })
         if (conv.unReadCount > 0) {
-            vert.addView(TextView(card.context).apply {
-                text = "${conv.unReadCount} 条未读"; textSize = 12f
-                setTextColor(0xFF6200EE.toInt()); setPadding(0, 8, 0, 0)
+            infoRow.addView(TextView(ctx).apply {
+                text = "  ${conv.unReadCount}"; textSize = 11f; setTextColor(Color.WHITE)
+                setBackgroundColor(0xFFFF4444.toInt())
+                gravity = Gravity.CENTER
+                setPadding(8, 2, 8, 2)
+                // Make it a pill shape by setting min-width
+                minWidth = 20
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(8, 0, 0, 0)
             })
         }
-        card.addView(vert)
+        textArea.addView(infoRow)
+        hRow.addView(textArea)
+        card.addView(hRow)
         card.setOnClickListener { onClick(conv) }
     }
 }
