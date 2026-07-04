@@ -94,8 +94,10 @@ object MessageParser {
     private fun parseImage(content: String?): ParsedMessage {
         if (content == null) return ParsedMessage(TYPE_IMAGE, "图片", null)
         try {
+            val xmlStart = content.indexOf("<?xml")
+            val clean = if (xmlStart >= 0) content.substring(xmlStart) else content
             val parser = XmlPullParserFactory.newInstance().newPullParser()
-            parser.setInput(StringReader(content))
+            parser.setInput(StringReader(clean))
             var aesKey: String? = null
             var cdnUrl: String? = null
             var length: Long = 0
@@ -130,8 +132,10 @@ object MessageParser {
     private fun parseVoice(content: String?): ParsedMessage {
         if (content == null) return ParsedMessage(TYPE_VOICE, "语音", null)
         try {
+            val xmlStart = content.indexOf("<?xml")
+            val clean = if (xmlStart >= 0) content.substring(xmlStart) else content
             val parser = XmlPullParserFactory.newInstance().newPullParser()
-            parser.setInput(StringReader(content))
+            parser.setInput(StringReader(clean))
             var voiceLength: String? = null
             var voiceFormat: String? = null
 
@@ -201,8 +205,13 @@ object MessageParser {
         val sb = StringBuilder()
 
         try {
+            // Strip sender prefix (wxid_xxx: ) before XML if present
+            val xmlStart = content.indexOf("<?xml")
+            if (xmlStart < 0) return ParsedMessage(TYPE_APP, typeDesc, content, subType)
+            val cleanContent = content.substring(xmlStart)
+
             val parser = XmlPullParserFactory.newInstance().newPullParser()
-            parser.setInput(StringReader(content))
+            parser.setInput(StringReader(cleanContent))
             var currentTag = ""
             while (parser.eventType != XmlPullParser.END_DOCUMENT) {
                 when (parser.eventType) {
