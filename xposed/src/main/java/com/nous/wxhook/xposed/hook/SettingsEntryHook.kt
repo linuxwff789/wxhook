@@ -1,70 +1,87 @@
 package com.nous.wxhook.xposed.hook
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Intent
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 
 /**
- * Hook WeChat to show a settings entry for wxhook module.
- * Approach: Hook LauncherUI.onCreate, show a dialog with "wxhook" option
+ * Hook WeChat to inject wxhook module entry button.
+ * Hooks LauncherUI.onStart + onResume for reliability.
  */
 object SettingsEntryHook {
 
     private const val TAG = "wxhook:Hook"
     private const val WXHOOK_PKG = "com.nous.wxhook"
+    private var injected = false
 
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != "com.tencent.mm") return
 
         val candidates = listOf(
             "com.tencent.mm.ui.LauncherUI",
-            "com.tencent.mm.plugin.setting.ui.setting_new.MainSettingsUI",
-            "com.tencent.mm.plugin.setting.ui.setting.SettingsUI"
+            "com.tencent.mm.plugin.setting.ui.setting_new.MainSettingsUI"
         )
 
         for (clsName in candidates) {
             try {
                 val cls = lpparam.classLoader.loadClass(clsName)
                 XposedBridge.log("$TAG hooking $clsName")
-                XposedHelpers.findAndHookMethod(cls, "onCreate",
-                    android.os.Bundle::class.java, object : XC_MethodHook() {
-                        override fun afterHookedMethod(param: MethodHookParam) {
-                            try {
-                                val activity = param.thisObject as Activity
-                                XposedBridge.log("$TAG onCreate called: $activity")
-                                injectButton(activity)
-                            } catch (e: Exception) {
-                                XposedBridge.log("$TAG error: $e")
-                            }
-                        }
-                    })
+                // Hook both onCreate and onResume for reliability
+                for (method in listOf("onCreate", "onResume")) {
+                    try {
+                        XposedHelpers.findAndHookMethod(cls, method,
+                            android.os.Bundle::class.java, object : XC_MethodHook() {
+                                override fun afterHookedMethod(param: MethodHookParam) {
+                                    try {
+                                        val activity = param.thisObject as Activity
+                                        XposedBridge.log("$TAG $method: ${activity.javaClass.simpleName}")
+                                        injectButton(activity)
+                                    } catch (e: Exception) {
+                                        XposedBridge.log("$TAG error in $method: $e")
+                                    }
+                                }
+                            })
+                    } catch (e: Exception) {
+                        XposedBridge.log("$TAG $clsName.$method not found: ${e.message}")
+                    }
+                }
+                return // success on first class
             } catch (e: Exception) {
-                XposedBridge.log("$TAG $clsName: ${e.message}")
+                XposedBridge.log("$TAG $clsName load failed: ${e.message}")
             }
         }
+        XposedBridge.log("$TAG no class loaded")
     }
 
     private fun injectButton(activity: Activity) {
+        if (injected) return
         try {
-            val root = activity.findViewById<android.view.View>(android.R.id.content)
+            val root = activity.findViewById<android.view.View>(android.R.id.content) as? ViewGroup
             if (root == null) {
-                XposedBridge.log("$TAG no content view found")
+                XposedBridge.log("$TAG root is null")
                 return
             }
-            XposedBridge.log("$TAG content view type: ${root.javaClass.simpleName}")
+            XposedBridge.log("$TAG root: ${root.javaClass.simpleName}")
 
+            // Check if already injected
             if (root.findViewWithTag<android.view.View>("wxhook_entry") != null) {
-                XposedBridge.log("$TAG button already exists")
+                XposedBridge.log("$TAG already injected")
                 return
             }
 
-            val btn = android.widget.Button(activity).apply {
-                text = "⚙️ wxhook"
+            val btn = TextView(activity).apply {
+                text = "⚙️ wxhook 模块"
                 tag = "wxhook_entry"
                 textSize = 14f
                 setPadding(32, 16, 32, 16)
@@ -78,25 +95,27 @@ object SettingsEntryHook {
                         }
                         activity.startActivity(intent)
                     } catch (e: Exception) {
-                        XposedBridge.log("$TAG startActivity error: $e")
+                        XposedBridge.log("$TAG startActivity: $e")
                     }
                 }
             }
 
-            val container = android.widget.FrameLayout(activity)
-            container.addView(btn, android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                gravity = android.view.Gravity.TOP or android.view.Gravity.END
-                setMargins(0, 200, 48, 0)
-            })
-            container.tag = "wxhook_entry"
+            val container = FrameLayout(activity).apply {
+                tag = "wxhook_entry"
+                addView(btn, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.END
+                    setMargins(0, 200, 48, 0)
+                })
+            }
 
-            (root as android.view.ViewGroup).addView(container)
-            XposedBridge.log("$TAG button injected!")
+            root.addView(container)
+            injected = true
+            XposedBridge.log("$TAG BUTTON INJECTED!")
         } catch (e: Exception) {
-            XposedBridge.log("$TAG injectButton error: $e")
+            XposedBridge.log("$TAG inject error: $e")
         }
     }
 }
