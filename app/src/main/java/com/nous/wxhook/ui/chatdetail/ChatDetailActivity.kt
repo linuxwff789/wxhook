@@ -236,7 +236,7 @@ class MessageAdapter(
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         val dir = if (msg.isSend) "→" else "←"
-        val parsed = MessageParser.parse(msg.type, msg.content, 0)
+        val parsed = MessageParser.parse(msg.type and 0xFF, msg.content, 0)
         top.addView(TextView(ctx).apply {
             text = "$dir ${typeTag(msg, parsed)}"; textSize = 12f; setTextColor(0xFF6200EE.toInt())
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -247,8 +247,7 @@ class MessageAdapter(
         })
         vert.addView(top)
 
-        // Body
-        when (msg.type) {
+        when (msg.type and 0xFF) {
             3 -> addImage(vert, ctx, msg)       // image → show thumbnail
             34 -> addVoice(vert, ctx, msg)       // voice
             43 -> addVideo(vert, ctx, msg)       // video → playable
@@ -397,7 +396,7 @@ class MessageAdapter(
     }
 
     private fun addVoice(vert: LinearLayout, ctx: android.content.Context, msg: ChatMessage) {
-        val parsed = MessageParser.parse(msg.type, msg.content, 0)
+        val parsed = MessageParser.parse(msg.type and 0xFF, msg.content, 0)
         val tv = TextView(ctx).apply {
             text = "  🎵 [语音] ${parsed.mediaPath?.let { "(${it}ms)" } ?: ""}\n  ⏳ 检查文件..."
             textSize = 14f; setTextColor(0xFF6200EE.toInt()); setPadding(0, 8, 0, 0)
@@ -494,7 +493,7 @@ class MessageAdapter(
         if (tv.text.isNotBlank()) vert.addView(tv)
     }
 
-    private fun typeTag(msg: ChatMessage, parsed: MessageParser.ParsedMessage): String = when (msg.type) {
+    private fun typeTag(msg: ChatMessage, parsed: MessageParser.ParsedMessage): String = when (msg.type and 0xFF) {
         1 -> "📝 文本"; 3 -> "🖼 图片"; 34 -> "🎵 语音"; 43 -> "🎬 视频"
         47 -> "😊 表情"; 48 -> "📍 位置"; 42 -> "👤 名片"
         49 -> when (parsed.subType) {
