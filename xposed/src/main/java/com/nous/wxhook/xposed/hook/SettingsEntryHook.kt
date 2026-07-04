@@ -30,7 +30,7 @@ object SettingsEntryHook {
             XposedBridge.log("$TAG found SettingsUI, hooking...")
 
             XposedHelpers.findAndHookMethod(settingsClass, "onCreate",
-                Bundle::class.java, object : XC_MethodHook() {
+                android.os.Bundle::class.java, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         try {
                             injectEntry(param.thisObject as android.app.Activity)
@@ -52,7 +52,7 @@ object SettingsEntryHook {
                 "com.tencent.mm.plugin.setting.ui.setting.SettingsUI\$MoreTabUI"
             )
             XposedHelpers.findAndHookMethod(moreClass, "onCreate",
-                Bundle::class.java, object : XC_MethodHook() {
+                android.os.Bundle::class.java, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         injectEntry(param.thisObject as android.app.Activity)
                     }
