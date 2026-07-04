@@ -477,7 +477,7 @@ class MessageAdapter(
     // ── Text content ──
     private fun addTextContent(vert: LinearLayout, ctx: android.content.Context, msg: ChatMessage, parsed: MessageParser.ParsedMessage) {
         val tv = TextView(ctx).apply { textSize = 14f; setTextColor(0xDE000000.toInt()); setPadding(0, 8, 0, 0) }
-        when (msg.type) {
+        when (msg.type and 0xFF) {
             1 -> {
                 val raw = parsed.content ?: "(空)"
                 if (isGroup && raw.contains(": ")) {
