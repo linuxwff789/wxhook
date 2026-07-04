@@ -21,45 +21,30 @@ object SettingsEntryHook {
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != TARGET_PKG) return
 
-        try {
-            // Hook WeChat's settings activity to inject our entry
-            // WeChat 8.0.74 uses SettingsUI or similar
-            val settingsClass = lpparam.classLoader.loadClass(
-                "com.tencent.mm.plugin.setting.ui.setting.SettingsUI"
-            )
-            XposedBridge.log("$TAG found SettingsUI, hooking...")
+        // Try known WeChat settings class names (8.0.74+ uses setting_new)
+        val candidates = listOf(
+            "com.tencent.mm.plugin.setting.ui.setting_new.MainSettingsUI",
+            "com.tencent.mm.plugin.setting.ui.setting.SettingsUI",
+            "com.tencent.mm.plugin.setting.ui.setting.SettingsUI\$MoreTabUI"
+        )
 
-            XposedHelpers.findAndHookMethod(settingsClass, "onCreate",
-                android.os.Bundle::class.java, object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
-                        try {
-                            injectEntry(param.thisObject as android.app.Activity)
-                        } catch (e: Exception) {
-                            XposedBridge.log("$TAG inject error: $e")
+        for (clsName in candidates) {
+            try {
+                val cls = lpparam.classLoader.loadClass(clsName)
+                XposedBridge.log("$TAG found $clsName, hooking...")
+                XposedHelpers.findAndHookMethod(cls, "onCreate",
+                    android.os.Bundle::class.java, object : XC_MethodHook() {
+                        override fun afterHookedMethod(param: MethodHookParam) {
+                            try { injectEntry(param.thisObject as android.app.Activity) }
+                            catch (e: Exception) { XposedBridge.log("$TAG inject error: $e") }
                         }
-                    }
-                })
-        } catch (e: Exception) {
-            XposedBridge.log("$TAG no SettingsUI, trying alternative: $e")
-            tryAlternative(lpparam)
+                    })
+                return // success
+            } catch (_: Exception) {
+                XposedBridge.log("$TAG $clsName not found, trying next")
+            }
         }
-    }
-
-    private fun tryAlternative(lpparam: XC_LoadPackage.LoadPackageParam) {
-        try {
-            // Fallback: hook MoreTabUI (the "Me" tab)
-            val moreClass = lpparam.classLoader.loadClass(
-                "com.tencent.mm.plugin.setting.ui.setting.SettingsUI\$MoreTabUI"
-            )
-            XposedHelpers.findAndHookMethod(moreClass, "onCreate",
-                android.os.Bundle::class.java, object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
-                        injectEntry(param.thisObject as android.app.Activity)
-                    }
-                })
-        } catch (e: Exception) {
-            XposedBridge.log("$TAG alternative also failed: $e")
-        }
+        XposedBridge.log("$TAG no settings class found")
     }
 
     private fun injectEntry(activity: android.app.Activity) {
