@@ -58,7 +58,7 @@ class ChatListActivity : AppCompatActivity() {
                     handler.post { progressBar.visibility = View.GONE; setContentView(TextView(this).apply { text = "数据库不存在"; textSize = 18f }) }; return@Thread }
                 val tag = System.currentTimeMillis().toString()
                 val sqlFile = File(cacheDir, "cl_${tag}.sql")
-                sqlFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT c.username,IFNULL(r.nickname,c.username),c.unReadCount,c.conversationTime,CASE WHEN c.username LIKE '%@chatroom' THEN 'group' WHEN c.username LIKE '%@app' OR c.username LIKE 'gh_%' THEN 'official' ELSE 'contact' END FROM rconversation c LEFT JOIN rcontact r ON c.username=r.username ORDER BY c.conversationTime DESC LIMIT 200;")
+                sqlFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT c.username,IFNULL(NULLIF(r.conRemark,''),IFNULL(r.nickname,c.username)),c.unReadCount,c.conversationTime,CASE WHEN c.username LIKE '%@chatroom' THEN 'group' WHEN c.username LIKE '%@app' OR c.username LIKE 'gh_%' THEN 'official' ELSE 'contact' END FROM rconversation c LEFT JOIN rcontact r ON c.username=r.username ORDER BY c.conversationTime DESC LIMIT 200;")
                 val sc = "LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher"
                 val proc = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$dbPath' < '${sqlFile.absolutePath}'"))
                 val lines = proc.inputStream.bufferedReader().readLines()
