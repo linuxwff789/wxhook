@@ -431,16 +431,44 @@ class MessageAdapter(
             textSize = 14f; setTextColor(0xFF6200EE.toInt()); setPadding(0, 8, 0, 0)
         }
         vert.addView(tv)
+        // File attachments in WeChat 8.0.74+ are stored in encrypted SFS
+        // and cannot be directly accessed from disk
+        // Show file info from XML content instead
         Thread {
-            val wxPath = resolveWxPath(msg.imgPath, 0)
-            val exists = wxPath != null && fileExists(wxPath)
-            val local = if (exists) copyToCache(wxPath!!) else null
+            // Try to extract file info from appattach table via msgSvrId
+            val key = "e9cd2ae"; val dbPath = "/sdcard/Download/EnMicroMsg.db"
+            val tag = System.currentTimeMillis().toString()
+            val sqlFile = File(cacheDir, "fi_${tag}.sql")
+            sqlFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT fileName,filePath,fileSize,status FROM appattach WHERE msgInfoId=${msg.msgSvrId} LIMIT 1;")
+            val sc = "LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher"
+            val p = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$dbPath' < '${sqlFile.absolutePath}'"))
+            val lines = p.inputStream.bufferedReader().readLines(); p.waitFor(); sqlFile.delete()
+            val infoLine = lines.lastOrNull { it.isNotBlank() && !it.startsWith("ok") }
             handler.post {
-                if (local != null) {
-                    tv.text = "  📎 ${fileName?.take(50) ?: "文件"}\n  ✅ 点此打开"
-                    tv.setOnClickListener { openFile(ctx, local) }
+                if (infoLine != null) {
+                    val parts = infoLine.split("|")
+                    val fName = (fileName ?: parts.getOrNull(0)?.take(50) ?: "文件")
+                    val filePath = parts.getOrNull(1) ?: ""
+                    val fileSize = parts.getOrNull(2)?.toLongOrNull() ?: 0L
+                    val status = parts.getOrNull(3)?.toIntOrNull() ?: 0
+                    val sizeStr = if (fileSize > 0) {
+                        if (fileSize > 1024*1024) "${"%.1f".format(fileSize.toFloat()/(1024*1024))}MB"
+                        else if (fileSize > 1024) "${fileSize/1024}KB"
+                        else "${fileSize}B"
+                    } else ""
+                    tv.text = buildString {
+                        append("  📎 $fName")
+                        if (sizeStr.isNotEmpty()) append(" ($sizeStr)")
+                        append("\n")
+                        append(when {
+                            status == 199 -> "  ⚠️ 文件未下载（需在微信中打开）"
+                            filePath.isNotEmpty() -> "  ✅ 点此打开"
+                            else -> "  🔒 文件已加密（SFS存储）"
+                        })
+                    }
+                    if (filePath.isNotEmpty()) tv.setOnClickListener { openFile(ctx, filePath) }
                 } else {
-                    tv.text = "  📎 ${fileName?.take(50) ?: "文件"}\n  ${if(wxPath==null)"⚠️ 需微信运行" else "⚠️ 文件已丢失"}"
+                    tv.text = "  📎 ${fileName?.take(50) ?: "文件"}\n  ⚠️ 文件未下载（需在微信中打开）"
                 }
             }
         }.start()
