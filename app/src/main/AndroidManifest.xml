@@ -76,6 +76,14 @@
             </intent-filter>
         </activity>
         <activity android:name=".ui.viewer.ImageViewerActivity" android:exported="false" />
+        <service
+            android:name=".ui.module.ModuleTileService"
+            android:exported="true"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>
