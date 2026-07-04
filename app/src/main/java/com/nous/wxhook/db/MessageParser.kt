@@ -242,10 +242,11 @@ object MessageParser {
             }
         } catch (_: Exception) {}
 
-        // Determine if it's a transfer or red packet
+        // Determine subtype from XML <type> element
         val detectedSubType = when {
             appMsgType == 2000 || title.contains("转账") || payAmount.contains("￥") || payAmount.contains("¥") -> APP_TRANSFER
             title.contains("红包") || title.contains("Red Packet") -> APP_RED_PACKET
+            appMsgType in listOf(5, 6, 8, 13, 14, 19, 20, 24, 33) -> appMsgType  // map XML type to our constants
             else -> subType
         }
 
@@ -258,6 +259,9 @@ object MessageParser {
         val finalTypeDesc = when (detectedSubType) {
             APP_TRANSFER -> if (amount.isNotEmpty()) "转账 ¥$amount" else "转账"
             APP_RED_PACKET -> "红包"
+            APP_LINK -> "链接"; APP_FILE -> "文件"; APP_IMAGE_MSG -> "图文消息"
+            APP_LOCATION -> "实时位置"; APP_COLLECTION -> "收藏"; APP_MERGE_FORWARD -> "合并转发"
+            APP_MINI_PROGRAM -> "小程序"; APP_MUSIC -> "音乐"; APP_MINI_CARD -> "小程序卡片"
             else -> typeDesc
         }
 
