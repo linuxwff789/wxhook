@@ -16,17 +16,10 @@ class ImagePopup(context: Context) {
 
     private val dialog: Dialog
     private val imageView: ImageView
-    private val matrix = Matrix()
-    private var savedMatrix = Matrix()
-    private var start = PointF()
-    private var mode = 0
-    private val detector: ScaleGestureDetector
-    private var prevSpacing = 0f
 
     init {
         val root = FrameLayout(context).apply { setBackgroundColor(0xFF000000.toInt()) }
 
-        // Close button — only this closes
         root.addView(TextView(context).apply {
             text = "✕"; textSize = 20f; gravity = Gravity.CENTER
             setTextColor(0xFFFFFFFF.toInt()); setBackgroundColor(0x44000000.toInt())
@@ -36,41 +29,8 @@ class ImagePopup(context: Context) {
             }
         })
 
-        imageView = ImageView(context).apply {
-            scaleType = ImageView.ScaleType.MATRIX
-            setOnTouchListener { v, event ->
-                detector.onTouchEvent(event)
-                val masked = event.action and MotionEvent.ACTION_MASK
-                when (masked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        savedMatrix.set(matrix)
-                        start.set(event.x, event.y)
-                        mode = 1; v.parent.requestDisallowInterceptTouchEvent(true)
-                        true
-                    }
-                    MotionEvent.ACTION_POINTER_DOWN -> { mode = 2; true }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> { mode = 0; v.parent.requestDisallowInterceptTouchEvent(false); true }
-                    MotionEvent.ACTION_MOVE -> {
-                        if (mode == 1) {
-                            matrix.set(savedMatrix)
-                            matrix.postTranslate(event.x - start.x, event.y - start.y)
-                        }
-                        try { imageMatrix = matrix } catch (_: Exception) {}
-                        true
-                    }
-                    else -> false
-                }
-            }
-        }
+        imageView = ZoomImageView(context)
         root.addView(imageView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-
-        detector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScale(d: ScaleGestureDetector): Boolean {
-                matrix.postScale(d.scaleFactor, d.scaleFactor, d.focusX, d.focusY)
-                try { imageView.imageMatrix = matrix } catch (_: Exception) {}
-                return true
-            }
-        })
 
         dialog = Dialog(context, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
             setContentView(root)
@@ -80,15 +40,94 @@ class ImagePopup(context: Context) {
 
     fun show(path: String) {
         imageView.setImageBitmap(android.graphics.BitmapFactory.decodeFile(path))
-        imageView.post {
-            val vw = imageView.width.toFloat(); val vh = imageView.height.toFloat()
-            val dw = imageView.drawable?.intrinsicWidth?.toFloat() ?: vw
-            val dh = imageView.drawable?.intrinsicHeight?.toFloat() ?: vh
+        dialog.show()
+    }
+
+    /** ImageView with built-in pinch-zoom and pan */
+    private class ZoomImageView(ctx: Context) : ImageView(ctx) {
+
+        private val matrix = Matrix()
+        private val saved = Matrix()
+        private val start = PointF()
+        private var mode = 0
+        private var maxScale = 5f; private var minScale = 0.5f
+        private val scaleDetector: ScaleGestureDetector
+
+        init {
+            scaleType = ScaleType.MATRIX
+            scaleDetector = ScaleGestureDetector(ctx, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(d: ScaleGestureDetector): Boolean {
+                    val sf = d.scaleFactor
+                    val cx = d.focusX; val cy = d.focusY
+                    // Prevent excessive zoom
+                    val cur = getCurrentScale()
+                    val next = cur * sf
+                    val clamped = if (next > maxScale) maxScale / cur else if (next < minScale) minScale / cur else sf
+                    matrix.postScale(clamped, clamped, cx, cy)
+                    fixTranslate()
+                    imageMatrix = matrix
+                    return true
+                }
+            })
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            scaleDetector.onTouchEvent(event)
+            val masked = event.actionMasked
+            when (masked) {
+                MotionEvent.ACTION_DOWN -> {
+                    saved.set(matrix); start.set(event.x, event.y); mode = 1
+                    parent.requestDisallowInterceptTouchEvent(true)
+                }
+                MotionEvent.ACTION_POINTER_DOWN -> mode = 2
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> mode = 0
+                MotionEvent.ACTION_MOVE -> if (mode == 1) {
+                    matrix.set(saved)
+                    matrix.postTranslate(event.x - start.x, event.y - start.y)
+                    fixTranslate()
+                    imageMatrix = matrix
+                }
+            }
+            return true
+        }
+
+        private fun getCurrentScale(): Float {
+            val v = FloatArray(9); matrix.getValues(v); return v[Matrix.MSCALE_X]
+        }
+
+        private fun fixTranslate() {
+            val vw = width.toFloat(); val vh = height.toFloat()
+            val dw = drawable?.intrinsicWidth?.toFloat() ?: vw
+            val dh = drawable?.intrinsicHeight?.toFloat() ?: vh
+            val vals = FloatArray(9); matrix.getValues(vals)
+            val sx = vals[Matrix.MSCALE_X]; val sy = vals[Matrix.MSCALE_Y]
+            var tx = vals[Matrix.MTRANS_X]; var ty = vals[Matrix.MTRANS_Y]
+            val iw = dw * sx; val ih = dh * sy
+            // Clamp to prevent image from going off-screen
+            if (tx > 0) tx = 0f
+            if (ty > 0) ty = 0f
+            if (tx < vw - iw) tx = vw - iw
+            if (ty < vh - ih) ty = vh - ih
+            // Don't over-clamp for small images
+            if (iw <= vw) tx = (vw - iw) / 2f
+            if (ih <= vh) ty = (vh - ih) / 2f
+            vals[Matrix.MTRANS_X] = tx; vals[Matrix.MTRANS_Y] = ty
+            matrix.setValues(vals)
+        }
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            post { centerImage() }
+        }
+
+        private fun centerImage() {
+            val vw = width.toFloat(); val vh = height.toFloat()
+            val dw = drawable?.intrinsicWidth?.toFloat() ?: vw
+            val dh = drawable?.intrinsicHeight?.toFloat() ?: vh
             val s = minOf(vw / dw, vh / dh, 1f)
             matrix.reset(); matrix.setScale(s, s)
             matrix.postTranslate((vw - dw * s) / 2, (vh - dh * s) / 2)
-            imageView.imageMatrix = matrix
+            imageMatrix = matrix
         }
-        dialog.show()
     }
 }
