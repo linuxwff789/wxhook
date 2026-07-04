@@ -24,6 +24,17 @@ object SettingsEntryHook {
     private const val TAG = "wxhook:Hook"
     private const val WXHOOK_PKG = "com.nous.wxhook"
     private var injected = false
+    private val callback = object : XC_MethodHook() {
+        override fun afterHookedMethod(param: MethodHookParam) {
+            try {
+                val activity = param.thisObject as Activity
+                XposedBridge.log("$TAG callback: ${activity.javaClass.simpleName}")
+                injectButton(activity)
+            } catch (e: Exception) {
+                XposedBridge.log("$TAG callback error: $e")
+            }
+        }
+    }
 
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != "com.tencent.mm") return
@@ -37,24 +48,17 @@ object SettingsEntryHook {
             try {
                 val cls = lpparam.classLoader.loadClass(clsName)
                 XposedBridge.log("$TAG hooking $clsName")
-                // Hook both onCreate and onResume for reliability
-                for (method in listOf("onCreate", "onResume")) {
-                    try {
-                        XposedHelpers.findAndHookMethod(cls, method,
-                            android.os.Bundle::class.java, object : XC_MethodHook() {
-                                override fun afterHookedMethod(param: MethodHookParam) {
-                                    try {
-                                        val activity = param.thisObject as Activity
-                                        XposedBridge.log("$TAG $method: ${activity.javaClass.simpleName}")
-                                        injectButton(activity)
-                                    } catch (e: Exception) {
-                                        XposedBridge.log("$TAG error in $method: $e")
-                                    }
-                                }
-                            })
-                    } catch (e: Exception) {
-                        XposedBridge.log("$TAG $clsName.$method not found: ${e.message}")
-                    }
+                // Hook onCreate (with Bundle) and onResume (no args)
+                try {
+                    XposedHelpers.findAndHookMethod(cls, "onCreate",
+                        android.os.Bundle::class.java, callback)
+                } catch (e: Exception) {
+                    XposedBridge.log("$TAG $clsName.onCreate: ${e.message}")
+                }
+                try {
+                    XposedHelpers.findAndHookMethod(cls, "onResume", callback)
+                } catch (e: Exception) {
+                    XposedBridge.log("$TAG $clsName.onResume: ${e.message}")
                 }
                 return // success on first class
             } catch (e: Exception) {
