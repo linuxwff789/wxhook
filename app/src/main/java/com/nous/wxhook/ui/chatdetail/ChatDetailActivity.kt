@@ -447,7 +447,7 @@ class MessageAdapter(
             handler.post {
                 if (infoLine != null) {
                     val parts = infoLine.split("|")
-                    val fName = (fileName ?: parts.getOrNull(0)?.take(50) ?: "文件")
+                    val fName = fileName?.take(50) ?: "文件"
                     val filePath = parts.getOrNull(1) ?: ""
                     val fileSize = parts.getOrNull(2)?.toLongOrNull() ?: 0L
                     val status = parts.getOrNull(3)?.toIntOrNull() ?: 0
@@ -505,7 +505,7 @@ class MessageAdapter(
                             }
                         }
                     }
-                    MessageParser.APP_FILE -> addFile(vert, ctx, msg, parsed.fileName)
+                    MessageParser.APP_FILE -> addFile(vert, ctx, msg, parsed.title ?: parsed.fileName)
                     MessageParser.APP_MINI_PROGRAM -> tv.text = "[小程序] ${parsed.title?.take(50) ?: ""}"
                     MessageParser.APP_TRANSFER -> tv.text = "💰 转账\n  金额: ${parsed.typeDesc}\n  ${parsed.title?.take(100) ?: ""}"
                     MessageParser.APP_RED_PACKET -> tv.text = "🧧 红包\n  ${parsed.title?.take(100) ?: ""}"
