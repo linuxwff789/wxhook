@@ -306,7 +306,7 @@ class MessageAdapter(
                     if (bm != null) {
                         tv.visibility = View.GONE
                         iv.setImageBitmap(bm); iv.visibility = View.VISIBLE
-                        iv.setOnClickListener { ctx.startActivity(Intent(ctx, com.nous.wxhook.ui.viewer.ImageViewerActivity::class.java).putExtra("path", localPath)) }
+                        iv.setOnClickListener { com.nous.wxhook.ui.viewer.ImagePopup(ctx).show(localPath) }
                     } else {
                         tv.text = "  ⚠️ 图片解码失败（文件损坏）"; tv.visibility = View.VISIBLE
                     }
