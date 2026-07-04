@@ -8,6 +8,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage
 import com.nous.wxhook.xposed.hook.KeyCaptureHook
 import com.nous.wxhook.xposed.hook.MessageHook
 import com.nous.wxhook.xposed.hook.AntiRecallHook
+import com.nous.wxhook.xposed.hook.SettingsEntryHook
 
 class WeChatHookEntry : IXposedHookLoadPackage {
 
@@ -24,5 +25,8 @@ class WeChatHookEntry : IXposedHookLoadPackage {
 
         // Hook 防撤回
         AntiRecallHook.hook(lpparam)
+
+        // Hook 设置入口
+        SettingsEntryHook.hook(lpparam)
     }
 }

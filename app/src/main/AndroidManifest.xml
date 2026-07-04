@@ -69,6 +69,7 @@
             android:name=".service.DecryptService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+        <activity android:name=".ui.module.ModuleActivity" android:exported="true" />
         <activity android:name=".ui.viewer.ImageViewerActivity" android:exported="false" />
     </application>
 
