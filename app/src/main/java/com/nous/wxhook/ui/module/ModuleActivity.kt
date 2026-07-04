@@ -20,6 +20,7 @@ class ModuleActivity : AppCompatActivity() {
     private lateinit var intervalText: EditText
     private lateinit var logView: TextView
     private var isBackingUp = false
+    private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
