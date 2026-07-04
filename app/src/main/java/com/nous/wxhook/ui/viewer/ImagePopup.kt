@@ -19,15 +19,14 @@ class ImagePopup(context: Context) {
     private val matrix = Matrix()
     private var savedMatrix = Matrix()
     private var start = PointF()
-    private var mode = 0 // 0=none, 1=drag, 2=zoom
+    private var mode = 0
     private val detector: ScaleGestureDetector
+    private var prevSpacing = 0f
 
     init {
-        val root = FrameLayout(context).apply {
-            setOnClickListener { dialog.dismiss() }
-            setBackgroundColor(0xFF000000.toInt())
-        }
-        // Close button
+        val root = FrameLayout(context).apply { setBackgroundColor(0xFF000000.toInt()) }
+
+        // Close button — only this closes
         root.addView(TextView(context).apply {
             text = "✕"; textSize = 20f; gravity = Gravity.CENTER
             setTextColor(0xFFFFFFFF.toInt()); setBackgroundColor(0x44000000.toInt())
@@ -36,19 +35,31 @@ class ImagePopup(context: Context) {
                 gravity = Gravity.TOP or Gravity.END; setMargins(0, 96, 32, 0)
             }
         })
-        // Image viewer with pinch zoom
+
         imageView = ImageView(context).apply {
             scaleType = ImageView.ScaleType.MATRIX
-            setOnTouchListener { _, event ->
+            setOnTouchListener { v, event ->
                 detector.onTouchEvent(event)
-                when (event.action and MotionEvent.ACTION_MASK) {
-                    MotionEvent.ACTION_DOWN -> { savedMatrix.set(matrix); start.set(event.x, event.y); mode = 1 }
-                    MotionEvent.ACTION_POINTER_DOWN -> mode = 2
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> mode = 0
-                    MotionEvent.ACTION_MOVE -> if (mode == 1) { matrix.set(savedMatrix); matrix.postTranslate(event.x - start.x, event.y - start.y) }
+                val masked = event.action and MotionEvent.ACTION_MASK
+                when (masked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        savedMatrix.set(matrix)
+                        start.set(event.x, event.y)
+                        mode = 1; v.parent.requestDisallowInterceptTouchEvent(true)
+                        true
+                    }
+                    MotionEvent.ACTION_POINTER_DOWN -> { mode = 2; true }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> { mode = 0; v.parent.requestDisallowInterceptTouchEvent(false); true }
+                    MotionEvent.ACTION_MOVE -> {
+                        if (mode == 1) {
+                            matrix.set(savedMatrix)
+                            matrix.postTranslate(event.x - start.x, event.y - start.y)
+                        }
+                        try { imageMatrix = matrix } catch (_: Exception) {}
+                        true
+                    }
+                    else -> false
                 }
-                try { imageMatrix = matrix } catch (_: Exception) {}
-                true
             }
         }
         root.addView(imageView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -56,6 +67,7 @@ class ImagePopup(context: Context) {
         detector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(d: ScaleGestureDetector): Boolean {
                 matrix.postScale(d.scaleFactor, d.scaleFactor, d.focusX, d.focusY)
+                try { imageView.imageMatrix = matrix } catch (_: Exception) {}
                 return true
             }
         })
