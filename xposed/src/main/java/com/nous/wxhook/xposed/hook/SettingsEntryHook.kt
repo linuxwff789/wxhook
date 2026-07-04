@@ -48,19 +48,10 @@ object SettingsEntryHook {
             try {
                 val cls = lpparam.classLoader.loadClass(clsName)
                 XposedBridge.log("$TAG hooking $clsName")
-                // Hook onCreate (with Bundle) and onResume (no args)
-                try {
-                    XposedHelpers.findAndHookMethod(cls, "onCreate",
-                        android.os.Bundle::class.java, callback)
-                } catch (e: Exception) {
-                    XposedBridge.log("$TAG $clsName.onCreate: ${e.message}")
-                }
-                try {
-                    XposedHelpers.findAndHookMethod(cls, "onResume", callback)
-                } catch (e: Exception) {
-                    XposedBridge.log("$TAG $clsName.onResume: ${e.message}")
-                }
-                return // success on first class
+                XposedBridge.hookAllMethods(cls, "onCreate", callback)
+                XposedBridge.hookAllMethods(cls, "onResume", callback)
+                XposedBridge.hookAllMethods(cls, "onStart", callback)
+                return
             } catch (e: Exception) {
                 XposedBridge.log("$TAG $clsName load failed: ${e.message}")
             }
