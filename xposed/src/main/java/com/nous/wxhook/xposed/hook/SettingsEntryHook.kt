@@ -50,13 +50,15 @@ object SettingsEntryHook {
 
             val item = createItem(activity)
 
-            // Find the actual container we can add children to
-            val target = findAddableContainer(root)
+            // Strategy: find ScrollView → its child LinearLayout → add item at end
+            val target = findScrollViewChild(root)
             if (target != null) {
                 target.addView(item)
-                XposedBridge.log("$TAG injected into ${target.javaClass.simpleName}")
+                XposedBridge.log("$TAG added to ${target.javaClass.simpleName} (child count: ${target.childCount})")
             } else {
-                XposedBridge.log("$TAG no addable container found")
+                // Fallback: add to content view (might be hidden)
+                root.addView(item)
+                XposedBridge.log("$TAG added to content root (fallback)")
             }
         } catch (e: Exception) {
             XposedBridge.log("$TAG error: $e")
@@ -64,39 +66,25 @@ object SettingsEntryHook {
     }
 
     /**
-     * Recursively find the deepest ViewGroup that can accept our item.
-     * ScrollView can only have one child, so we go into its child.
+     * Find the LinearLayout/ViewGroup inside a ScrollView that holds settings items.
      */
-    private fun findAddableContainer(view: ViewGroup): ViewGroup? {
-        // If it's a ScrollView, go into its single child
+    private fun findScrollViewChild(view: ViewGroup): ViewGroup? {
         if (view is ScrollView) {
             if (view.childCount > 0) {
                 val child = view.getChildAt(0)
-                if (child is ViewGroup) {
-                    val result = findAddableContainer(child)
-                    return result ?: child
-                }
+                if (child is ViewGroup) return child
             }
             return null
         }
-
-        // If it's a LinearLayout, RecyclerView, etc. - we can add here
-        val name = view.javaClass.name
-        if (name.contains("LinearLayout") || name.contains("RecyclerView") ||
-            name.contains("FrameLayout") || name.contains("RelativeLayout")) {
-            // Go deeper if possible, otherwise this is our target
-            for (i in 0 until view.childCount) {
-                val child = view.getChildAt(i)
-                if (child is ViewGroup && child.childCount > 0) {
-                    val result = findAddableContainer(child)
-                    if (result != null) return result
-                }
+        // Recurse
+        for (i in 0 until view.childCount) {
+            val child = view.getChildAt(i)
+            if (child is ViewGroup) {
+                val result = findScrollViewChild(child)
+                if (result != null) return result
             }
-            return view
         }
-
-        // Unknown ViewGroup, try to add here
-        return view
+        return null
     }
 
     private fun createItem(activity: android.content.Context): View {
