@@ -46,7 +46,7 @@ class ModuleActivity : AppCompatActivity() {
         // ── Backup card ──
         vert.addView(makeTitle("💾 备份"))
         val backupDesc = TextView(this).apply {
-            text = "备份已解密的数据库到 /sdcard/Download/\n当前数据库: EnMicroMsg.db (${getDbSizeMB()} MB)"
+            text = "全量备份: DB + 图片/语音/视频/附件\n增量备份: 仅新文件"
             textSize = 13f; setTextColor(0x8A000000.toInt())
         }
         vert.addView(backupDesc)
