@@ -11,7 +11,8 @@ import java.util.Locale
 object BackupManager {
 
     private const val TAG = "wxhook:Backup"
-    private const val WXHOOK_DIR = "/sdcard/Download/wxhook_backup"
+    private const val DEFAULT_WXHOOK_DIR = "/sdcard/Download/wxhook_backup"
+    private var customDir: String? = null
     private const val STATE_FILE = "backup_state.json"
 
     data class BackupResult(
@@ -126,10 +127,14 @@ object BackupManager {
     /**
      * Get backup directory info
      */
+    fun setBackupDir(path: String) { customDir = path }
+    fun getBackupDir(): String = customDir ?: DEFAULT_WXHOOK_DIR
+
     fun getBackupInfo(): JSONObject {
-        val dir = File(WXHOOK_DIR)
+        val dir = File(getBackupDir())
         val state = loadState()
         val info = JSONObject()
+        info.put("backupDir", dir.absolutePath)
         info.put("exists", dir.exists())
         info.put("totalSize", dir.totalSpace)
         info.put("usedSize", dir.listFiles()?.sumOf { it.length() } ?: 0)
@@ -142,7 +147,7 @@ object BackupManager {
     // ── Private helpers ──
 
     private fun ensureBackupDir(): File {
-        val dir = File(WXHOOK_DIR)
+        val dir = File(getBackupDir())
         if (!dir.exists()) dir.mkdirs()
         return dir
     }
@@ -219,11 +224,11 @@ object BackupManager {
         state.put("lastBackupTag", tag)
         state.put("fileCount", fileCount)
         state.put("totalSize", totalSize)
-        File(WXHOOK_DIR, STATE_FILE).writeText(state.toString())
+        File(getBackupDir(), STATE_FILE).writeText(state.toString())
     }
 
     private fun loadState(): JSONObject {
-        val f = File(WXHOOK_DIR, STATE_FILE)
+        val f = File(getBackupDir(), STATE_FILE)
         return if (f.exists()) {
             try { JSONObject(f.readText()) } catch (e: Exception) { JSONObject() }
         } else JSONObject()
