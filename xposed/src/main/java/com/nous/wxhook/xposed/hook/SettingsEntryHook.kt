@@ -3,78 +3,86 @@ package com.nous.wxhook.xposed.hook
 import android.app.Activity
 import android.content.ComponentName
 import android.content.Intent
-import android.view.Menu
-import android.view.MenuItem
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 
 /**
- * Hook WeChat settings to add wxhook menu entry.
- * Uses onCreateOptionsMenu approach (方案一).
+ * Hook WeChat settings to add wxhook module entry.
+ * Strategy: hook Activity.onResume globally, filter by class name.
  */
 object SettingsEntryHook {
 
     private const val TAG = "wxhook:Hook"
     private const val WXHOOK_PKG = "com.nous.wxhook"
-    private const val MENU_ID = 0x48574B // "HWK" in hex
+    private var injected = false
 
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != "com.tencent.mm") return
 
-        val candidates = listOf(
-            "com.tencent.mm.plugin.setting.ui.setting_new.MainSettingsUI",
-            "com.tencent.mm.plugin.setting.ui.setting.SettingsUI"
-        )
-
-        for (clsName in candidates) {
-            try {
-                val cls = lpparam.classLoader.loadClass(clsName)
-                XposedBridge.log("$TAG found $clsName, hooking menu...")
-
-                // Hook onCreateOptionsMenu to add our menu item
-                // Hook onResume to inject our entry via dialog
-                XposedHelpers.findAndHookMethod(cls, "onResume", object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
-                        try {
-                            val activity = param.thisObject as Activity
-                            XposedBridge.log("$TAG onResume: ${activity.javaClass.simpleName}")
-                            android.widget.Toast.makeText(activity, "⚙️ wxhook: 进入模块", android.widget.Toast.LENGTH_SHORT).show()
-                            // Add preference to settings
-                            val ps = (activity as? android.preference.PreferenceActivity)?.preferenceScreen
-                            if (ps != null) {
-                                XposedBridge.log("$TAG preferenceScreen found")
-                            } else {
-                                XposedBridge.log("$TAG no preferenceScreen, trying addContentView")
-                                val btn = android.widget.Button(activity).apply {
-                                    text = "⚙️ wxhook 模块"
-                                    setOnClickListener {
-                                        activity.startActivity(android.content.Intent().apply {
-                                            component = android.content.ComponentName(WXHOOK_PKG, "$WXHOOK_PKG.ui.module.ModuleActivity")
-                                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        })
-                                    }
-                                }
-                                activity.addContentView(btn, android.widget.FrameLayout.LayoutParams(
-                                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-                                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
-                                ).apply {
-                                    gravity = android.view.Gravity.BOTTOM or android.view.Gravity.END
-                                    setMargins(0, 0, 32, 32)
-                                })
-                                XposedBridge.log("$TAG button added via addContentView!")
-                            }
-                        } catch (e: Exception) {
-                            XposedBridge.log("$TAG onResume error: $e")
-                        }
+        // Hook Activity.onResume at framework level - guaranteed to fire
+        XposedHelpers.findAndHookMethod(
+            android.app.Activity::class.java,
+            "onResume",
+            object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val activity = param.thisObject as? Activity ?: return
+                    val name = activity.javaClass.name
+                    // Only target WeChat settings activities
+                    if (name.contains("Settings") || name.contains("settings")) {
+                        XposedBridge.log("$TAG settings activity: $name")
+                        injectButton(activity)
                     }
-                })
-                return // success
-            } catch (e: Exception) {
-                XposedBridge.log("$TAG $clsName: ${e.message}")
+                }
+            })
+        XposedBridge.log("$TAG framework onResume hook installed")
+    }
+
+    private fun injectButton(activity: Activity) {
+        if (injected) return
+        try {
+            val root = activity.findViewById<android.view.View>(android.R.id.content) as? ViewGroup
+                ?: return
+            if (root.findViewWithTag<android.view.View>("wxhook_entry") != null) return
+
+            val btn = TextView(activity).apply {
+                text = "⚙️ wxhook 模块"
+                tag = "wxhook_entry"
+                textSize = 13f
+                setPadding(24, 12, 24, 12)
+                setTextColor(0xFFFFFFFF.toInt())
+                setBackgroundColor(0xFF6200EE.toInt())
+                setOnClickListener {
+                    try {
+                        activity.startActivity(Intent().apply {
+                            component = ComponentName(WXHOOK_PKG, "$WXHOOK_PKG.ui.module.ModuleActivity")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        })
+                    } catch (e: Exception) {
+                        XposedBridge.log("$TAG startActivity: $e")
+                    }
+                }
             }
+            val container = FrameLayout(activity).apply {
+                tag = "wxhook_entry"
+                addView(btn, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.END
+                    setMargins(0, 200, 48, 0)
+                })
+            }
+            root.addView(container)
+            injected = true
+            XposedBridge.log("$TAG BUTTON INJECTED into $activity")
+        } catch (e: Exception) {
+            XposedBridge.log("$TAG inject error: $e")
         }
-        XposedBridge.log("$TAG no settings class found")
     }
 }
