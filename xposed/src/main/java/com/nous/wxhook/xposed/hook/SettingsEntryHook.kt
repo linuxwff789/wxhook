@@ -113,13 +113,6 @@ object SettingsEntryHook {
             )
         }
 
-        // Divider at top
-        val divider = View(activity).apply {
-            setBackgroundColor(dividerColor)
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
-        }
-        row.addView(divider)
-
         val iconBg = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(0xFF6200EE.toInt())
