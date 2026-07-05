@@ -12,8 +12,8 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
+import androidx.recyclerview.widget.RecyclerView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -50,37 +50,43 @@ object SettingsEntryHook {
 
             val item = createItem(activity)
 
-            // Strategy: find ScrollView → its child LinearLayout → add item at end
-            val target = findScrollViewChild(root)
-            if (target != null) {
-                target.addView(item)
-                XposedBridge.log("$TAG added to ${target.javaClass.simpleName} (child count: ${target.childCount})")
+            // Find RecyclerView by traversing the view tree
+            val rv = findRecyclerView(root)
+            if (rv != null) {
+                // Add a wrapper that goes ABOVE the RecyclerView
+                val wrapper = android.widget.FrameLayout(activity).apply {
+                    tag = "wxhook_entry"
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                    addView(item)
+                }
+                // Insert wrapper before the RecyclerView (so it shows above)
+                val parent = rv.parent as? ViewGroup
+                if (parent != null) {
+                    val idx = parent.indexOfChild(rv)
+                    parent.addView(wrapper, idx)
+                    XposedBridge.log("$TAG injected above RecyclerView at index $idx")
+                } else {
+                    root.addView(wrapper, 0)
+                    XposedBridge.log("$TAG injected to content root above RV")
+                }
             } else {
-                // Fallback: add to content view (might be hidden)
-                root.addView(item)
-                XposedBridge.log("$TAG added to content root (fallback)")
+                root.addView(item, 0)
+                XposedBridge.log("$TAG injected to content root (no RV found)")
             }
         } catch (e: Exception) {
             XposedBridge.log("$TAG error: $e")
         }
     }
 
-    /**
-     * Find the LinearLayout/ViewGroup inside a ScrollView that holds settings items.
-     */
-    private fun findScrollViewChild(view: ViewGroup): ViewGroup? {
-        if (view is ScrollView) {
-            if (view.childCount > 0) {
-                val child = view.getChildAt(0)
-                if (child is ViewGroup) return child
-            }
-            return null
-        }
-        // Recurse
+    private fun findRecyclerView(view: ViewGroup): RecyclerView? {
         for (i in 0 until view.childCount) {
             val child = view.getChildAt(i)
+            if (child is RecyclerView) return child
             if (child is ViewGroup) {
-                val result = findScrollViewChild(child)
+                val result = findRecyclerView(child)
                 if (result != null) return result
             }
         }
@@ -89,7 +95,6 @@ object SettingsEntryHook {
 
     private fun createItem(activity: android.content.Context): View {
         val row = LinearLayout(activity).apply {
-            tag = "wxhook_entry"
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(16), dp(14), dp(16), dp(14))
