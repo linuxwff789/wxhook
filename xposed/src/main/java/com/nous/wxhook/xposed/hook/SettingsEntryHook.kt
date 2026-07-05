@@ -43,7 +43,7 @@ object SettingsEntryHook {
                     }
                 }
             })
-        XposedBridge.log("$tag framework hook installed")
+        XposedBridge.log("$TAG framework hook installed")
     }
 
     private fun inject(activity: Activity) {
