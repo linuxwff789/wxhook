@@ -27,6 +27,12 @@ class WeChatHookEntry : IXposedHookLoadPackage {
         AntiRecallHook.hook(lpparam)
 
         // Hook 设置入口
-        SettingsEntryHook.hook(lpparam)
+        XposedBridge.log("[wxhook] calling SettingsEntryHook...")
+        try {
+            SettingsEntryHook.hook(lpparam)
+            XposedBridge.log("[wxhook] SettingsEntryHook done")
+        } catch (e: Exception) {
+            XposedBridge.log("[wxhook] SettingsEntryHook error: $e")
+        }
     }
 }
