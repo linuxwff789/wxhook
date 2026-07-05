@@ -17,15 +17,13 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import java.lang.reflect.Proxy
 
-/**
- * Inject wxhook entry into WeChat settings.
- * Uses onResume hook + finds RecyclerView parent to add item below it.
- */
 object SettingsEntryHook {
 
     private const val TAG = "wxhook:Hook"
     private const val WXHOOK_PKG = "com.nous.wxhook"
+    private const val VIEW_TYPE = 99999
     private val handler = Handler(Looper.getMainLooper())
 
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
@@ -39,7 +37,7 @@ object SettingsEntryHook {
                     val activity = param.thisObject as? Activity ?: return
                     val name = activity.javaClass.name
                     if (name.contains("Settings") || name.contains("settings")) {
-                        handler.postDelayed({ inject(activity) }, 600)
+                        handler.postDelayed({ inject(activity) }, 500)
                     }
                 }
             })
@@ -51,20 +49,48 @@ object SettingsEntryHook {
             val root = activity.findViewById<View>(android.R.id.content) as? ViewGroup ?: return
             if (root.findViewWithTag<View>("wxhook_item") != null) return
 
-            val item = createItem(activity)
+            // Find RecyclerView
+            val rv = findByClassName(root, "RecyclerView") ?: run {
+                XposedBridge.log("$TAG no RecyclerView")
+                return
+            }
 
-            // Find RecyclerView by class name and add item BELOW it
-            val rv = findByClassName(root, "RecyclerView")
-            if (rv != null) {
-                val parent = rv.parent as? ViewGroup
-                if (parent != null) {
-                    val idx = parent.indexOfChild(rv)
-                    parent.addView(item, idx + 1) // insert right after RecyclerView
-                    XposedBridge.log("$TAG added after RecyclerView at index ${idx + 1}")
-                    return
+            // Get the adapter
+            val adapterField = rv.javaClass.getDeclaredField("mAdapter").apply { isAccessible = true }
+            val adapter = adapterField.get(rv) ?: run {
+                XposedBridge.log("$TAG no adapter")
+                return
+            }
+
+            // Check if already wrapped
+            if (adapter.javaClass.name.contains("WxhookProxy")) return
+
+            // Get the original adapter class's interfaces
+            val adapterInterfaces = adapter.javaClass.interfaces
+
+            // Create a dynamic proxy
+            val proxy = Proxy.newProxyInstance(
+                adapter.javaClass.classLoader,
+                adapterInterfaces
+            ) { _, method, args ->
+                when (method.name) {
+                    "getItemCount" -> {
+                        val orig = method.invoke(adapter, *(args ?: emptyArray())) as Int
+                        orig + 1
+                    }
+                    "getItemViewType" -> {
+                        val pos = args?.get(0) as? Int ?: return@newProxyInstance method.invoke(adapter, *(args ?: emptyArray()))
+                        if (pos == 0) VIEW_TYPE else method.invoke(adapter, *(args ?: emptyArray()))
+                    }
+                    "getItemCount" -> method.invoke(adapter, *(args ?: emptyArray()))
+                    else -> method.invoke(adapter, *(args ?: emptyArray()))
                 }
             }
-            XposedBridge.log("$TAG no RecyclerView found")
+
+            // Set the proxy as adapter
+            adapterField.set(rv, proxy)
+
+            XposedBridge.log("$TAG adapter wrapped!")
         } catch (e: Exception) {
             XposedBridge.log("$TAG error: $e")
         }
@@ -100,35 +126,19 @@ object SettingsEntryHook {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
-
         val iconBg = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF6200EE.toInt()); setSize(dp(36), dp(36)) }
         row.addView(TextView(activity).apply { text = "⚙"; textSize = 16f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; background = iconBg; layoutParams = LinearLayout.LayoutParams(dp(36), dp(36)) })
-
         val textArea = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(dp(14), 0, 0, 0) } }
         textArea.addView(TextView(activity).apply { text = "wxhook 模块"; textSize = 16f; setTextColor(textColor); typeface = Typeface.DEFAULT_BOLD })
         textArea.addView(TextView(activity).apply { text = "备份 · 定时备份 · 模块状态"; textSize = 12f; setTextColor(subColor) })
         row.addView(textArea)
-
         row.addView(TextView(activity).apply { text = "›"; textSize = 20f; setTextColor(arrowColor); gravity = Gravity.CENTER })
-
-        row.setOnClickListener {
-            try {
-                it.context.startActivity(Intent().apply {
-                    component = ComponentName(WXHOOK_PKG, "$WXHOOK_PKG.ui.module.ModuleActivity")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                })
-            } catch (e: Exception) {
-                XposedBridge.log("$TAG startActivity: $e")
-            }
-        }
-
+        row.setOnClickListener { try { it.context.startActivity(Intent().apply { component = ComponentName(WXHOOK_PKG, "$WXHOOK_PKG.ui.module.ModuleActivity"); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }) } catch (e: Exception) { XposedBridge.log("$TAG startActivity: $e") } }
         return row
     }
 
-    private fun isDarkMode(context: android.content.Context): Boolean {
-        val flags = context.resources.configuration.uiMode
-        return (flags and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-    }
+    private fun isDarkMode(context: android.content.Context): Boolean =
+        (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
 
     private fun dp(value: Int): Int = (value * android.content.res.Resources.getSystem().displayMetrics.density).toInt()
 }
