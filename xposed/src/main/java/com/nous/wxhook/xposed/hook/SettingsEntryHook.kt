@@ -13,7 +13,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.recyclerview.widget.RecyclerView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -81,7 +80,7 @@ object SettingsEntryHook {
         }
     }
 
-    private fun findRecyclerView(view: ViewGroup): RecyclerView? {
+    private fun findRecyclerView(view: ViewGroup): ViewGroup? {
         for (i in 0 until view.childCount) {
             val child = view.getChildAt(i)
             if (child is RecyclerView) return child
