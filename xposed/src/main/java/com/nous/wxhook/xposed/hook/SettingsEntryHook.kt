@@ -69,11 +69,11 @@ object SettingsEntryHook {
                     parent.addView(wrapper, idx)
                     XposedBridge.log("$TAG injected above RecyclerView at index $idx")
                 } else {
-                    root.addView(wrapper, 0)
+                    activity.addContentView(wrapper, android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
                     XposedBridge.log("$TAG injected to content root above RV")
                 }
             } else {
-                root.addView(item, 0)
+                activity.addContentView(item, android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
                 XposedBridge.log("$TAG injected to content root (no RV found)")
             }
         } catch (e: Exception) {
