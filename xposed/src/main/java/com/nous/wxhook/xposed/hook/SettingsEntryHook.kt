@@ -34,6 +34,7 @@ object SettingsEntryHook {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val activity = param.thisObject as? Activity ?: return
                     val name = activity.javaClass.name
+                    XposedBridge.log("$TAG onResume: $name")
                     if (name.contains("Settings") || name.contains("settings")) {
                         handler.post { inject(activity) }
                     }
