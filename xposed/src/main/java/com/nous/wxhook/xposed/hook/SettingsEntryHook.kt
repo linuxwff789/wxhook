@@ -25,7 +25,7 @@ object SettingsEntryHook {
 
     private const val TAG = "wxhook:Hook"
     private const val WXHOOK_PKG = "com.nous.wxhook"
-    private var lastActivity: String = ""
+    // removed lastActivity
 
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != "com.tencent.mm") return
@@ -38,8 +38,8 @@ object SettingsEntryHook {
                     val activity = param.thisObject as? Activity ?: return
                     val name = activity.javaClass.name
                     if (name.contains("Settings") || name.contains("settings")) {
-                        if (lastActivity != name) {
-                            lastActivity = name
+                        
+                            
                             injectSettingsItem(activity)
                         }
                     }
