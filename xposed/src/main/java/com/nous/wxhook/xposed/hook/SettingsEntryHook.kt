@@ -93,7 +93,7 @@ object SettingsEntryHook {
         return null
     }
 
-    private fun createItem(activity: android.content.Context): View {
+    private fun createItem(activity: Activity): View {
         val dark = isDarkMode(activity)
         val bgColor = if (dark) 0xFF2C2C2C.toInt() else Color.WHITE
         val textColor = if (dark) 0xFFE0E0E0.toInt() else 0xFF1A1A1A.toInt()
