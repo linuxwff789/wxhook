@@ -20,7 +20,7 @@ object SettingsEntryHook {
 
     private const val TAG = "wxhook:Hook"
     private const val WXHOOK_PKG = "com.nous.wxhook"
-    private var injected = false
+    // removed injected flag
 
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != "com.tencent.mm") return
@@ -44,7 +44,7 @@ object SettingsEntryHook {
     }
 
     private fun injectButton(activity: Activity) {
-        if (injected) return
+        
         try {
             val root = activity.findViewById<android.view.View>(android.R.id.content) as? ViewGroup
                 ?: return
@@ -79,7 +79,7 @@ object SettingsEntryHook {
                 })
             }
             root.addView(container)
-            injected = true
+            
             XposedBridge.log("$TAG BUTTON INJECTED into $activity")
         } catch (e: Exception) {
             XposedBridge.log("$TAG inject error: $e")
