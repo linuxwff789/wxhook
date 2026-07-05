@@ -83,7 +83,7 @@ object SettingsEntryHook {
     private fun findRecyclerView(view: ViewGroup): ViewGroup? {
         for (i in 0 until view.childCount) {
             val child = view.getChildAt(i)
-            if (child is RecyclerView) return child
+            if (child.javaClass.simpleName.contains("RecyclerView") || child.javaClass.simpleName.contains("ListView")) return child as ViewGroup
             if (child is ViewGroup) {
                 val result = findRecyclerView(child)
                 if (result != null) return result
