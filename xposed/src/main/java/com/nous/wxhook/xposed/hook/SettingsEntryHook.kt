@@ -6,22 +6,30 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.recyclerview.widget.RecyclerView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 
+/**
+ * Inject wxhook entry into WeChat settings via RecyclerView adapter wrapping.
+ * The item scrolls naturally with the list.
+ */
 object SettingsEntryHook {
 
     private const val TAG = "wxhook:Hook"
     private const val WXHOOK_PKG = "com.nous.wxhook"
+    private const val VIEW_TYPE_WXHOOK = 99999
     private val handler = Handler(Looper.getMainLooper())
 
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
@@ -35,81 +43,97 @@ object SettingsEntryHook {
                     val activity = param.thisObject as? Activity ?: return
                     val name = activity.javaClass.name
                     if (name.contains("Settings") || name.contains("settings")) {
-                        // Remove old one first, then re-inject
-                        handler.postDelayed({
-                            removeOld(activity)
-                            inject(activity)
-                        }, 600)
+                        handler.postDelayed({ wrapAdapters(activity) }, 500)
                     }
                 }
             })
-        XposedBridge.log("$TAG framework onResume hook installed")
+        XposedBridge.log("$TAG framework hook installed")
     }
 
-    private fun removeOld(activity: Activity) {
-        val root = activity.findViewById<View>(android.R.id.content) as? ViewGroup ?: return
-        val old = root.findViewWithTag<View>("wxhook_entry") ?: return
-        (old.parent as? ViewGroup)?.removeView(old)
-    }
-
-    private fun inject(activity: Activity) {
+    private fun wrapAdapters(activity: Activity) {
         try {
             val root = activity.findViewById<View>(android.R.id.content) as? ViewGroup ?: return
-            val item = createItem(activity)
+            val rv = findRecyclerView(root) ?: return
 
-            val rv = findByClassName(root, "RecyclerView")
-            if (rv != null) {
-                val rvGroup = rv as ViewGroup
-                if (rvGroup.childCount > 0) {
-                    val child0 = rvGroup.getChildAt(0) as? ViewGroup
-                    if (child0 != null) {
-                        child0.addView(item) // append at BOTTOM
-                        XposedBridge.log("$TAG appended to bottom (${child0.childCount} items)")
-                        return
+            val adapter = rv.adapter ?: run {
+                XposedBridge.log("$TAG RecyclerView has no adapter")
+                return
+            }
+
+            // Check if already wrapped
+            if (adapter.javaClass.simpleName.contains("Wxhook")) return
+
+            // Wrap the adapter via Xposed
+            val wrappedAdapter = Proxy.newProxyInstance(
+                adapter.javaClass.classLoader,
+                arrayOf(RecyclerView.Adapter::class.java)
+            ) { _, method, args ->
+                when (method.name) {
+                    "getItemCount" -> {
+                        val original = method.invoke(adapter, *(args ?: emptyArray())) as Int
+                        original + 1 // +1 for our wxhook item
                     }
+                    "getItemViewType" -> {
+                        val pos = args?.get(0) as? Int ?: 0
+                        val original = method.invoke(adapter, *(args ?: emptyArray())) as Int
+                        if (pos == 0) VIEW_TYPE_WXHOOK else original
+                    }
+                    "onCreateViewHolder" -> {
+                        val viewType = args?.get(1) as? Int ?: 0
+                        if (viewType == VIEW_TYPE_WXHOOK) {
+                            createViewHolder(rv)
+                        } else {
+                            method.invoke(adapter, *(args ?: emptyArray()))
+                        }
+                    }
+                    "onBindViewHolder" -> {
+                        val holder = args?.get(0) as RecyclerView.ViewHolder
+                        val pos = args?.get(1) as? Int ?: 0
+                        if (holder.itemView.tag == "wxhook_item") {
+                            // Already bound
+                        } else {
+                            method.invoke(adapter, *(args ?: emptyArray()))
+                        }
+                    }
+                    else -> method.invoke(adapter, *(args ?: emptyArray()))
                 }
-                val parent = rv.parent as? ViewGroup
-                if (parent != null) {
-                    parent.addView(item)
-                    XposedBridge.log("$TAG added below RecyclerView")
-                    return
-                }
-            }
-            XposedBridge.log("$TAG no RecyclerView found")
+            } as RecyclerView.Adapter<*>
+
+            rv.adapter = wrappedAdapter
+            XposedBridge.log("$TAG adapter wrapped!")
         } catch (e: Exception) {
-            XposedBridge.log("$TAG error: $e")
+            XposedBridge.log("$TAG wrap error: $e")
         }
     }
 
-    private fun findByClassName(view: ViewGroup, name: String): View? {
-        for (i in 0 until view.childCount) {
-            val child = view.getChildAt(i)
-            if (child.javaClass.simpleName.contains(name)) return child
-            if (child is ViewGroup) {
-                val r = findByClassName(child, name)
-                if (r != null) return r
-            }
-        }
-        return null
+    private fun createViewHolder(rv: RecyclerView): RecyclerView.ViewHolder {
+        val holder = object : RecyclerView.ViewHolder(createItemView(rv.context)) {}
+        return holder
     }
 
-    private fun createItem(activity: Activity): View {
-        val dark = isDarkMode(activity)
+    private fun createItemView(context: android.content.Context): View {
+        val dark = isDarkMode(context)
         val bgColor = if (dark) 0xFF2C2C2C.toInt() else Color.WHITE
         val textColor = if (dark) 0xFFE0E0E0.toInt() else 0xFF1A1A1A.toInt()
-        val subColor = if (dark) 0xFF999999.toInt() else 0xFF999999.toInt()
+        val subColor = 0xFF999999.toInt()
         val arrowColor = if (dark) 0xFF666666.toInt() else 0xFFCCCCCC.toInt()
-        val dividerColor = if (dark) 0xFF3A3A3A.toInt() else 0xFFE5E5E5.toInt()
 
-        val row = LinearLayout(activity).apply {
-            tag = "wxhook_entry"
+        val row = FrameLayout(context).apply {
+            tag = "wxhook_item"
+            setBackgroundColor(bgColor)
+            layoutParams = RecyclerView.LayoutParams(
+                RecyclerView.LayoutParams.MATCH_PARENT,
+                RecyclerView.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val inner = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(16), dp(14), dp(16), dp(14))
-            setBackgroundColor(bgColor)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
             )
         }
 
@@ -118,40 +142,21 @@ object SettingsEntryHook {
             setColor(0xFF6200EE.toInt())
             setSize(dp(36), dp(36))
         }
-        row.addView(TextView(activity).apply {
-            text = "⚙"
-            textSize = 16f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            background = iconBg
-            layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
+        inner.addView(TextView(context).apply {
+            text = "⚙"; textSize = 16f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; background = iconBg; layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
         })
 
-        val textArea = LinearLayout(activity).apply {
+        val textArea = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                setMargins(dp(14), 0, 0, 0)
-            }
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(dp(14), 0, 0, 0) }
         }
-        textArea.addView(TextView(activity).apply {
-            text = "wxhook 模块"
-            textSize = 16f
-            setTextColor(textColor)
-            typeface = Typeface.DEFAULT_BOLD
-        })
-        textArea.addView(TextView(activity).apply {
-            text = "备份 · 定时备份 · 模块状态"
-            textSize = 12f
-            setTextColor(subColor)
-        })
-        row.addView(textArea)
+        textArea.addView(TextView(context).apply { text = "wxhook 模块"; textSize = 16f; setTextColor(textColor); typeface = Typeface.DEFAULT_BOLD })
+        textArea.addView(TextView(context).apply { text = "备份 · 定时备份 · 模块状态"; textSize = 12f; setTextColor(subColor) })
+        inner.addView(textArea)
 
-        row.addView(TextView(activity).apply {
-            text = "›"
-            textSize = 20f
-            setTextColor(arrowColor)
-            gravity = Gravity.CENTER
-        })
+        inner.addView(TextView(context).apply { text = "›"; textSize = 20f; setTextColor(arrowColor); gravity = Gravity.CENTER })
+
+        row.addView(inner)
 
         row.setOnClickListener {
             try {
@@ -167,8 +172,20 @@ object SettingsEntryHook {
         return row
     }
 
-    private fun isDarkMode(activity: Activity): Boolean {
-        val flags = activity.resources.configuration.uiMode
+    private fun findRecyclerView(view: ViewGroup): RecyclerView? {
+        for (i in 0 until view.childCount) {
+            val child = view.getChildAt(i)
+            if (child is RecyclerView) return child
+            if (child is ViewGroup) {
+                val r = findRecyclerView(child)
+                if (r != null) return r
+            }
+        }
+        return null
+    }
+
+    private fun isDarkMode(context: android.content.Context): Boolean {
+        val flags = context.resources.configuration.uiMode
         return (flags and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
     }
 
