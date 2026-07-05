@@ -11,10 +11,8 @@ import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.recyclerview.widget.RecyclerView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -22,58 +20,66 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage
 
 /**
  * Inject wxhook entry into WeChat settings.
- * Strategy: hook RecyclerView.setAdapter() to wrap the adapter with an extra item.
+ * Uses onResume hook + finds RecyclerView parent to add item below it.
  */
 object SettingsEntryHook {
 
     private const val TAG = "wxhook:Hook"
     private const val WXHOOK_PKG = "com.nous.wxhook"
-    private const val VIEW_TYPE_WXHOOK = 99999
     private val handler = Handler(Looper.getMainLooper())
 
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != "com.tencent.mm") return
 
-        // Hook RecyclerView.setAdapter to wrap the adapter
         XposedHelpers.findAndHookMethod(
-            RecyclerView::class.java, "setAdapter",
-            RecyclerView.Adapter::class.java,
+            android.app.Activity::class.java,
+            "onResume",
             object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    val rv = param.thisObject as? RecyclerView ?: return
-                    val adapter = param.args[0] as? RecyclerView.Adapter<*> ?: return
-
-                    // Check if this is a settings page RecyclerView
-                    val activity = rv.context as? Activity ?: return
+                    val activity = param.thisObject as? Activity ?: return
                     val name = activity.javaClass.name
-                    if (!name.contains("Settings") && !name.contains("settings")) return
-
-                    // Skip if already wrapped
-                    if (adapter.javaClass.name.contains("Wxhook")) return
-
-                    handler.postDelayed({ injectItem(rv, adapter) }, 300)
+                    if (name.contains("Settings") || name.contains("settings")) {
+                        handler.postDelayed({ inject(activity) }, 600)
+                    }
                 }
             })
-        XposedBridge.log("$TAG setAdapter hook installed")
+        XposedBridge.log("$tag framework hook installed")
     }
 
-    private fun injectItem(rv: RecyclerView, originalAdapter: RecyclerView.Adapter<*>) {
+    private fun inject(activity: Activity) {
         try {
-            val activity = rv.context as? Activity ?: return
+            val root = activity.findViewById<View>(android.R.id.content) as? ViewGroup ?: return
+            if (root.findViewWithTag<View>("wxhook_item") != null) return
+
             val item = createItem(activity)
 
-            // Create a wrapper view that contains both original content and our item
-            // Actually, just add a footer view to the RecyclerView's parent
-            val parent = rv.parent as? ViewGroup ?: return
-
-            // Check if already added
-            if (parent.findViewWithTag<View>("wxhook_item") != null) return
-
-            parent.addView(item)
-            XposedBridge.log("$tag wxhook item added below RecyclerView")
+            // Find RecyclerView by class name and add item BELOW it
+            val rv = findByClassName(root, "RecyclerView")
+            if (rv != null) {
+                val parent = rv.parent as? ViewGroup
+                if (parent != null) {
+                    val idx = parent.indexOfChild(rv)
+                    parent.addView(item, idx + 1) // insert right after RecyclerView
+                    XposedBridge.log("$TAG added after RecyclerView at index ${idx + 1}")
+                    return
+                }
+            }
+            XposedBridge.log("$TAG no RecyclerView found")
         } catch (e: Exception) {
-            XposedBridge.log("$TAG inject error: $e")
+            XposedBridge.log("$TAG error: $e")
         }
+    }
+
+    private fun findByClassName(view: ViewGroup, name: String): View? {
+        for (i in 0 until view.childCount) {
+            val child = view.getChildAt(i)
+            if (child.javaClass.simpleName.contains(name)) return child
+            if (child is ViewGroup) {
+                val r = findByClassName(child, name)
+                if (r != null) return r
+            }
+        }
+        return null
     }
 
     private fun createItem(activity: Activity): View {
