@@ -3,21 +3,25 @@ package com.nous.wxhook.xposed.hook
 import android.app.Activity
 import android.content.ComponentName
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.preference.Preference
-import android.preference.PreferenceActivity
-import android.preference.PreferenceCategory
-import android.preference.PreferenceScreen
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
+import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 
 /**
- * Hook WeChat settings to add wxhook entry via Preference API.
- * Uses WeChat's own preference rendering system.
+ * Inject wxhook entry into WeChat settings via onCreate + delayed injection.
+ * Finds RecyclerView child and appends our item.
  */
 object SettingsEntryHook {
 
@@ -28,15 +32,6 @@ object SettingsEntryHook {
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != "com.tencent.mm") return
 
-        // Try 1: Hook PreferenceActivity.addPreferencesFromResource
-        hookPreferenceActivity(lpparam)
-        // Try 2: Hook PreferenceActivity.addPreference
-        hookAddPreference(lpparam)
-        // Try 3: Hook onCreate as fallback
-        hookOnCreate(lpparam)
-    }
-
-    private fun hookOnCreate(lpparam: XC_LoadPackage.LoadPackageParam) {
         val candidates = listOf(
             "com.tencent.mm.plugin.setting.ui.setting_new.MainSettingsUI",
             "com.tencent.mm.plugin.setting.ui.setting_new.CommonSettingsUI"
@@ -44,11 +39,12 @@ object SettingsEntryHook {
         for (clsName in candidates) {
             try {
                 val cls = lpparam.classLoader.loadClass(clsName)
-                XposedBridge.log("$TAG hooking $clsName.onCreate")
+                XposedBridge.log("$TAG hooking $clsName")
                 XposedHelpers.findAndHookMethod(cls, "onCreate", Bundle::class.java, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val activity = param.thisObject as? Activity ?: return
-                        handler.postDelayed({ tryAddPreference(activity) }, 500)
+                        // Delay 600ms for RecyclerView to populate
+                        handler.postDelayed({ inject(activity) }, 600)
                     }
                 })
                 return
@@ -56,93 +52,119 @@ object SettingsEntryHook {
         }
     }
 
-    private fun hookPreferenceActivity(lpparam: XC_LoadPackage.LoadPackageParam) {
+    private fun inject(activity: Activity) {
         try {
-            XposedHelpers.findAndHookMethod(
-                PreferenceActivity::class.java, "addPreferencesFromResource",
-                Int::class.javaPrimitiveType, object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
-                        val activity = param.thisObject as? Activity ?: return
-                        val name = activity.javaClass.name
-                        if (name.contains("Settings") || name.contains("settings")) {
-                            handler.post { tryAddPreference(activity) }
-                        }
+            val root = activity.findViewById<View>(android.R.id.content) as? ViewGroup ?: return
+            if (root.findViewWithTag<View>("wxhook_entry") != null) return
+
+            val item = createItem(activity)
+
+            // Find RecyclerView
+            val rv = findByClassName(root, "RecyclerView")
+            if (rv != null) {
+                val rvGroup = rv as ViewGroup
+                if (rvGroup.childCount > 0) {
+                    val child0 = rvGroup.getChildAt(0) as? ViewGroup
+                    if (child0 != null) {
+                        child0.addView(item)
+                        XposedBridge.log("$TAG appended to ${child0.javaClass.simpleName} (${child0.childCount} items)")
+                        return
                     }
-                })
-            XposedBridge.log("$TAG hooked PreferenceActivity.addPreferencesFromResource")
-        } catch (e: Exception) {
-            XposedBridge.log("$TAG PreferenceActivity hook failed: ${e.message}")
-        }
-    }
-
-    private fun hookAddPreference(lpparam: XC_LoadPackage.LoadPackageParam) {
-        try {
-            XposedHelpers.findAndHookMethod(
-                PreferenceActivity::class.java, "addPreference",
-                Preference::class.java, object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
-                        val activity = param.thisObject as? Activity ?: return
-                        val name = activity.javaClass.name
-                        if (name.contains("Settings") || name.contains("settings")) {
-                            handler.post { tryAddPreference(activity) }
-                        }
-                    }
-                })
-            XposedBridge.log("$TAG hooked PreferenceActivity.addPreference")
-        } catch (e: Exception) {
-            XposedBridge.log("$TAG addPreference hook failed: ${e.message}")
-        }
-    }
-
-    private fun tryAddPreference(activity: Activity) {
-        try {
-            if (activity !is PreferenceActivity) {
-                XposedBridge.log("$TAG not a PreferenceActivity: ${activity.javaClass.simpleName}")
-                return
-            }
-            // Check if already added
-            val ps = activity.preferenceScreen ?: return
-            if (findPreferenceByKey(ps, "wxhook_module") != null) return
-
-            // Create category
-            val cat = PreferenceCategory(activity).apply {
-                key = "wxhook_category"
-                title = "扩展插件"
-                order = 9999
-            }
-            ps.addPreference(cat)
-
-            // Create preference
-            val pref = Preference(activity).apply {
-                key = "wxhook_module"
-                title = "wxhook 模块"
-                summary = "备份 · 定时备份 · 模块状态"
-                order = 10000
-                setOnPreferenceClickListener {
-                    try {
-                        activity.startActivity(Intent().apply {
-                            component = ComponentName(WXHOOK_PKG, "$WXHOOK_PKG.ui.module.ModuleActivity")
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        })
-                    } catch (e: Exception) {
-                        XposedBridge.log("$TAG startActivity: $e")
-                    }
-                    true
+                }
+                // Fallback: add to RecyclerView's parent
+                val parent = rv.parent as? ViewGroup
+                if (parent != null) {
+                    parent.addView(item, parent.indexOfChild(rv))
+                    XposedBridge.log("$TAG added above RecyclerView")
+                    return
                 }
             }
-            ps.addPreference(pref)
-
-            XposedBridge.log("$TAG preference added!")
+            XposedBridge.log("$TAG no RecyclerView found")
         } catch (e: Exception) {
-            XposedBridge.log("$TAG tryAddPreference error: $e")
+            XposedBridge.log("$TAG error: $e")
         }
     }
 
-    private fun findPreferenceByKey(screen: PreferenceScreen, key: String): Preference? {
-        for (i in 0 until screen.preferenceCount) {
-            val p = screen.getPreference(i)
-            if (p.key == key) return p
+    private fun findByClassName(view: ViewGroup, name: String): View? {
+        for (i in 0 until view.childCount) {
+            val child = view.getChildAt(i)
+            if (child.javaClass.simpleName.contains(name)) return child
+            if (child is ViewGroup) {
+                val r = findByClassName(child, name)
+                if (r != null) return r
+            }
         }
         return null
+    }
+
+    private fun createItem(activity: android.content.Context): View {
+        val row = LinearLayout(activity).apply {
+            tag = "wxhook_entry"
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            setBackgroundColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val iconBg = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(0xFF6200EE.toInt())
+            setSize(dp(36), dp(36))
+        }
+        row.addView(TextView(activity).apply {
+            text = "⚙"
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            background = iconBg
+            layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
+        })
+
+        val textArea = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setMargins(dp(14), 0, 0, 0)
+            }
+        }
+        textArea.addView(TextView(activity).apply {
+            text = "wxhook 模块"
+            textSize = 16f
+            setTextColor(0xFF1A1A1A.toInt())
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        textArea.addView(TextView(activity).apply {
+            text = "备份 · 定时备份 · 模块状态"
+            textSize = 12f
+            setTextColor(0xFF999999.toInt())
+        })
+        row.addView(textArea)
+
+        row.addView(TextView(activity).apply {
+            text = "›"
+            textSize = 20f
+            setTextColor(0xFFCCCCCC.toInt())
+            gravity = Gravity.CENTER
+        })
+
+        row.setOnClickListener {
+            try {
+                it.context.startActivity(Intent().apply {
+                    component = ComponentName(WXHOOK_PKG, "$WXHOOK_PKG.ui.module.ModuleActivity")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            } catch (e: Exception) {
+                XposedBridge.log("$TAG startActivity: $e")
+            }
+        }
+
+        return row
+    }
+
+    private fun dp(value: Int): Int {
+        return (value * android.content.res.Resources.getSystem().displayMetrics.density).toInt()
     }
 }
