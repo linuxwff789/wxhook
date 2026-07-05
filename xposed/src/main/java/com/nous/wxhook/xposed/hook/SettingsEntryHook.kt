@@ -9,7 +9,6 @@ import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.ViewGroup
 import android.view.View
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
@@ -17,15 +16,10 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 
-/**
- * Hook WeChat settings to add wxhook module entry.
- * Injects a preference-style item matching WeChat's native settings look.
- */
 object SettingsEntryHook {
 
     private const val TAG = "wxhook:Hook"
     private const val WXHOOK_PKG = "com.nous.wxhook"
-    // removed lastActivity
 
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != "com.tencent.mm") return
@@ -38,10 +32,7 @@ object SettingsEntryHook {
                     val activity = param.thisObject as? Activity ?: return
                     val name = activity.javaClass.name
                     if (name.contains("Settings") || name.contains("settings")) {
-                        
-                            
-                            injectSettingsItem(activity)
-                        }
+                        injectSettingsItem(activity)
                     }
                 }
             })
@@ -53,7 +44,6 @@ object SettingsEntryHook {
             val root = activity.findViewById<View>(android.R.id.content) as? ViewGroup ?: return
             if (root.findViewWithTag<View>("wxhook_entry") != null) return
 
-            // Build a preference-style row: [icon] [title + subtitle] [>]
             val row = LinearLayout(activity).apply {
                 tag = "wxhook_entry"
                 orientation = LinearLayout.HORIZONTAL
@@ -66,7 +56,6 @@ object SettingsEntryHook {
                 )
             }
 
-            // Icon circle (purple)
             val iconBg = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(0xFF6200EE.toInt())
@@ -82,7 +71,6 @@ object SettingsEntryHook {
             }
             row.addView(icon)
 
-            // Text area
             val textArea = LinearLayout(activity).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -102,7 +90,6 @@ object SettingsEntryHook {
             })
             row.addView(textArea)
 
-            // Right arrow ">"
             row.addView(TextView(activity).apply {
                 text = "›"
                 textSize = 20f
@@ -121,13 +108,11 @@ object SettingsEntryHook {
                 }
             }
 
-            // Divider line at top
             val divider = View(activity).apply {
                 setBackgroundColor(0xFFE5E5E5.toInt())
                 layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
             }
 
-            // Insert at the top of the content (below any existing views)
             root.addView(divider, 0)
             root.addView(row, 1)
 
