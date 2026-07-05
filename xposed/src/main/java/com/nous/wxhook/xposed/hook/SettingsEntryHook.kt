@@ -34,33 +34,42 @@ object SettingsEntryHook {
                 XposedBridge.log("$TAG found $clsName, hooking menu...")
 
                 // Hook onCreateOptionsMenu to add our menu item
-                XposedHelpers.findAndHookMethod(cls, "onCreateOptionsMenu",
-                    Menu::class.java, object : XC_MethodHook() {
-                        override fun afterHookedMethod(param: MethodHookParam) {
-                            try {
-                                val menu = param.args[0] as Menu
-                                // Add our item at the end
-                                menu.add(0, MENU_ID, 999, "⚙️ wxhook 模块").apply {
-                                    setOnMenuItemClickListener { _ ->
-                                        try {
-                                            val activity = param.thisObject as Activity
-                                            activity.startActivity(Intent().apply {
-                                                component = ComponentName(WXHOOK_PKG, "$WXHOOK_PKG.ui.module.ModuleActivity")
-                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            })
-                                        } catch (e: Exception) {
-                                            XposedBridge.log("$TAG startActivity: $e")
-                                        }
-                                        true
+                // Hook onResume to inject our entry via dialog
+                XposedHelpers.findAndHookMethod(cls, "onResume", object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        try {
+                            val activity = param.thisObject as Activity
+                            XposedBridge.log("$TAG onResume: ${activity.javaClass.simpleName}")
+                            android.widget.Toast.makeText(activity, "⚙️ wxhook: 进入模块", android.widget.Toast.LENGTH_SHORT).show()
+                            // Add preference to settings
+                            val ps = (activity as? android.preference.PreferenceActivity)?.preferenceScreen
+                            if (ps != null) {
+                                XposedBridge.log("$TAG preferenceScreen found")
+                            } else {
+                                XposedBridge.log("$TAG no preferenceScreen, trying addContentView")
+                                val btn = android.widget.Button(activity).apply {
+                                    text = "⚙️ wxhook 模块"
+                                    setOnClickListener {
+                                        activity.startActivity(android.content.Intent().apply {
+                                            component = android.content.ComponentName(WXHOOK_PKG, "$WXHOOK_PKG.ui.module.ModuleActivity")
+                                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        })
                                     }
-                                    setIcon(android.R.drawable.ic_menu_manage)
                                 }
-                                XposedBridge.log("$TAG menu item added!")
-                            } catch (e: Exception) {
-                                XposedBridge.log("$TAG menu error: $e")
+                                activity.addContentView(btn, android.widget.FrameLayout.LayoutParams(
+                                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+                                ).apply {
+                                    gravity = android.view.Gravity.BOTTOM or android.view.Gravity.END
+                                    setMargins(0, 0, 32, 32)
+                                })
+                                XposedBridge.log("$TAG button added via addContentView!")
                             }
+                        } catch (e: Exception) {
+                            XposedBridge.log("$TAG onResume error: $e")
                         }
-                    })
+                    }
+                })
                 return // success
             } catch (e: Exception) {
                 XposedBridge.log("$TAG $clsName: ${e.message}")
