@@ -12,16 +12,13 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 
-/**
- * Hook WeChat settings to inject wxhook entry into the actual settings list.
- * Finds the settings list view and appends our item.
- */
 object SettingsEntryHook {
 
     private const val TAG = "wxhook:Hook"
@@ -31,7 +28,6 @@ object SettingsEntryHook {
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != "com.tencent.mm") return
 
-        // Hook Activity.onResume at framework level
         XposedHelpers.findAndHookMethod(
             android.app.Activity::class.java,
             "onResume",
@@ -40,56 +36,70 @@ object SettingsEntryHook {
                     val activity = param.thisObject as? Activity ?: return
                     val name = activity.javaClass.name
                     if (name.contains("Settings") || name.contains("settings")) {
-                        handler.post { injectIntoList(activity) }
+                        handler.post { inject(activity) }
                     }
                 }
             })
         XposedBridge.log("$TAG framework hook installed")
     }
 
-    private fun injectIntoList(activity: Activity) {
+    private fun inject(activity: Activity) {
         try {
             val root = activity.findViewById<View>(android.R.id.content) as? ViewGroup ?: return
             if (root.findViewWithTag<View>("wxhook_entry") != null) return
 
-            // Find the actual list container (RecyclerView, ListView, ScrollView, etc.)
-            val listContainer = findListContainer(root)
+            val item = createItem(activity)
 
-            // Create the settings-style item
-            val item = createSettingsItem(activity)
-
-            if (listContainer != null) {
-                // Inject into the list
-                listContainer.addView(item)
-                XposedBridge.log("$TAG injected into ${listContainer.javaClass.simpleName}")
+            // Find the actual container we can add children to
+            val target = findAddableContainer(root)
+            if (target != null) {
+                target.addView(item)
+                XposedBridge.log("$TAG injected into ${target.javaClass.simpleName}")
             } else {
-                // Fallback: add to content view at the end
-                root.addView(item)
-                XposedBridge.log("$TAG injected into content (no list found)")
+                XposedBridge.log("$TAG no addable container found")
             }
         } catch (e: Exception) {
-            XposedBridge.log("$TAG inject error: $e")
+            XposedBridge.log("$TAG error: $e")
         }
     }
 
-    private fun findListContainer(root: ViewGroup): ViewGroup? {
-        // Try to find RecyclerView or ListView by traversing the view tree
-        for (i in 0 until root.childCount) {
-            val child = root.getChildAt(i)
-            val className = child.javaClass.name
-            if (className.contains("RecyclerView") || className.contains("ListView") ||
-                className.contains("ScrollView") || className.contains("NestedScrollView")) {
-                return child as? ViewGroup
+    /**
+     * Recursively find the deepest ViewGroup that can accept our item.
+     * ScrollView can only have one child, so we go into its child.
+     */
+    private fun findAddableContainer(view: ViewGroup): ViewGroup? {
+        // If it's a ScrollView, go into its single child
+        if (view is ScrollView) {
+            if (view.childCount > 0) {
+                val child = view.getChildAt(0)
+                if (child is ViewGroup) {
+                    val result = findAddableContainer(child)
+                    return result ?: child
+                }
             }
-            if (child is ViewGroup) {
-                val found = findListContainer(child)
-                if (found != null) return found
-            }
+            return null
         }
-        return null
+
+        // If it's a LinearLayout, RecyclerView, etc. - we can add here
+        val name = view.javaClass.name
+        if (name.contains("LinearLayout") || name.contains("RecyclerView") ||
+            name.contains("FrameLayout") || name.contains("RelativeLayout")) {
+            // Go deeper if possible, otherwise this is our target
+            for (i in 0 until view.childCount) {
+                val child = view.getChildAt(i)
+                if (child is ViewGroup && child.childCount > 0) {
+                    val result = findAddableContainer(child)
+                    if (result != null) return result
+                }
+            }
+            return view
+        }
+
+        // Unknown ViewGroup, try to add here
+        return view
     }
 
-    private fun createSettingsItem(activity: android.content.Context): View {
+    private fun createItem(activity: android.content.Context): View {
         val row = LinearLayout(activity).apply {
             tag = "wxhook_entry"
             orientation = LinearLayout.HORIZONTAL
@@ -102,23 +112,20 @@ object SettingsEntryHook {
             )
         }
 
-        // Purple circle icon
         val iconBg = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(0xFF6200EE.toInt())
             setSize(dp(36), dp(36))
         }
-        val icon = TextView(activity).apply {
+        row.addView(TextView(activity).apply {
             text = "⚙"
             textSize = 16f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
             background = iconBg
             layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
-        }
-        row.addView(icon)
+        })
 
-        // Text area
         val textArea = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -138,7 +145,6 @@ object SettingsEntryHook {
         })
         row.addView(textArea)
 
-        // Right arrow
         row.addView(TextView(activity).apply {
             text = "›"
             textSize = 20f
@@ -146,11 +152,9 @@ object SettingsEntryHook {
             gravity = Gravity.CENTER
         })
 
-        // Click handler
         row.setOnClickListener {
             try {
-                val ctx = it.context
-                ctx.startActivity(Intent().apply {
+                it.context.startActivity(Intent().apply {
                     component = ComponentName(WXHOOK_PKG, "$WXHOOK_PKG.ui.module.ModuleActivity")
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 })
