@@ -69,12 +69,7 @@
             android:name=".service.DecryptService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
-        <activity android:name=".ui.module.ModuleActivity" android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+        <activity android:name=".ui.module.ModuleActivity" android:exported="true" />
         <activity android:name=".ui.viewer.ImageViewerActivity" android:exported="false" />
         <service
             android:name=".ui.module.ModuleTileService"
