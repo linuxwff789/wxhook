@@ -9,6 +9,7 @@ import com.nous.wxhook.xposed.hook.KeyCaptureHook
 import com.nous.wxhook.xposed.hook.MessageHook
 import com.nous.wxhook.xposed.hook.AntiRecallHook
 import com.nous.wxhook.xposed.hook.SettingsEntryHook
+import com.nous.wxhook.xposed.hook.BackupHook
 
 class WeChatHookEntry : IXposedHookLoadPackage {
 
@@ -25,6 +26,9 @@ class WeChatHookEntry : IXposedHookLoadPackage {
 
         // Hook 防撤回
         AntiRecallHook.hook(lpparam)
+
+        // Hook 备份功能
+        BackupHook.hook(lpparam)
 
         // Hook 设置入口
         XposedBridge.log("[wxhook] calling SettingsEntryHook...")
