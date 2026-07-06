@@ -8,7 +8,6 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.nous.wxhook.db.BackupManager
 import com.nous.wxhook.db.MergeEngine
 import java.io.File
 
@@ -46,7 +45,7 @@ class MergeActivity : Activity() {
     private fun mergeRecent() {
         contentText.text = "合并中..."
         Thread {
-            val backups = BackupManager.listBackups(this)
+            val backups = emptyList<Any>() // TODO: implement merge list
             if (backups.size < 2) {
                 handler.post { contentText.text = "需要至少 2 个备份才能合并" }
                 return@Thread
