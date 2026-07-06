@@ -1,119 +1,56 @@
 package com.nous.wxhook.ui.backup
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.widget.Button
+import android.os.Environment
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.nous.wxhook.db.BackupManager
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 class BackupActivity : Activity() {
-
-    private val handler = Handler(Looper.getMainLooper())
-    private lateinit var contentText: TextView
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        val scrollView = ScrollView(this)
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 48, 48, 48)
-        }
+        val sv = ScrollView(this)
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 48, 48, 48) }
 
         layout.addView(TextView(this).apply { text = "备份管理"; textSize = 20f })
 
-        layout.addView(Button(this).apply {
-            text = "创建备份"
-            setOnClickListener { createBackup() }
-        })
-        layout.addView(Button(this).apply {
-            text = "刷新列表"
-            setOnClickListener { loadBackups() }
-        })
-
-        contentText = TextView(this).apply {
-            textSize = 14f
-            setPadding(0, 32, 0, 0)
+        val dir = File("/sdcard/Download/wxhook_backup")
+        if (dir.exists()) {
+            val files = dir.listFiles()?.filter { it.name.endsWith(".db") }?.sortedByDescending { it.lastModified() } ?: emptyList()
+            layout.addView(TextView(this).apply { text = "\n备份文件 (${files.size}个)"; textSize = 16f })
+            if (files.isEmpty()) {
+                layout.addView(TextView(this).apply { text = "  暂无备份"; textSize = 14f; setPadding(0, 8, 0, 0) })
+            } else {
+                val fmt = SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault())
+                files.forEach { f ->
+                    val sizeMB = "%.1f".format(f.length().toFloat() / 1024 / 1024)
+                    val time = fmt.format(Date(f.lastModified()))
+                    layout.addView(TextView(this).apply {
+                        text = "  📦 ${f.name}\n     ${sizeMB}MB · $time"
+                        textSize = 13f; setPadding(0, 8, 0, 0)
+                    })
+                }
+            }
+            // 附件目录
+            val attDirs = listOf("image2", "voice2", "video", "cdn")
+            attDirs.forEach { d ->
+                val ad = File(dir, d)
+                if (ad.exists()) {
+                    val count = ad.walkTopDown().filter { it.isFile }.count()
+                    val sizeMB = "%.1f".format(ad.walkTopDown().filter { it.isFile }.sumOf { it.length() }.toFloat() / 1024 / 1024)
+                    layout.addView(TextView(this).apply { text = "  📁 $d/ ($count 文件, ${sizeMB}MB)"; textSize = 13f; setPadding(0, 4, 0, 0) })
+                }
+            }
+        } else {
+            layout.addView(TextView(this).apply { text = "\n暂无备份\n通过模块入口页面进行备份"; textSize = 14f })
         }
-        layout.addView(contentText)
 
-        scrollView.addView(layout)
-        setContentView(scrollView)
-
-        loadBackups()
-    }
-
-    private fun createBackup() {
-        contentText.text = "创建中..."
-        Thread {
-            val prefs = getSharedPreferences("wxhook", MODE_PRIVATE)
-            val key = prefs.getString("last_key", null) ?: "e9cd2ae"
-            val result = BackupManager.createBackup(this, key, "manual backup")
-            handler.post {
-                if (result != null) {
-                    contentText.text = "备份创建成功\n路径: ${result.path}\n大小: ${result.fileSize / 1024} KB"
-                    loadBackups()
-                } else {
-                    contentText.text = "备份创建失败（源数据库不存在）"
-                }
-            }
-        }.start()
-    }
-
-    private fun loadBackups() {
-        Thread {
-            val backups = BackupManager.listBackups(this)
-            val timeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-            val sb = StringBuilder()
-            sb.appendLine("共 ${backups.size} 个备份\n")
-
-            backups.forEachIndexed { i, b ->
-                sb.appendLine("${i + 1}. 📦 ${timeFormat.format(Date(b.timestamp))}")
-                sb.appendLine("   大小: ${b.fileSize / 1024} KB")
-                sb.appendLine("   路径: ${b.path}")
-                if (b.notes != null) sb.appendLine("   备注: ${b.notes}")
-                sb.appendLine()
-            }
-
-            if (backups.isEmpty()) sb.appendLine("暂无备份")
-            else sb.appendLine("长按备份可删除")
-
-            handler.post { contentText.text = sb.toString() }
-
-            // Add delete buttons for each backup
-            handler.post {
-                contentText.setOnLongClickListener {
-                    if (backups.isNotEmpty()) {
-                        val names = backups.map { timeFormat.format(Date(it.timestamp)) }.toTypedArray()
-                        AlertDialog.Builder(this)
-                            .setTitle("选择要删除的备份")
-                            .setItems(names) { _, which ->
-                                deleteBackup(backups[which].id)
-                            }
-                            .setNegativeButton("取消", null)
-                            .show()
-                    }
-                    true
-                }
-            }
-        }.start()
-    }
-
-    private fun deleteBackup(id: Long) {
-        Thread {
-            val ok = BackupManager.deleteBackup(this, id)
-            handler.post {
-                contentText.text = if (ok) "删除成功" else "删除失败"
-                loadBackups()
-            }
-        }.start()
+        sv.addView(layout)
+        setContentView(sv)
     }
 }
