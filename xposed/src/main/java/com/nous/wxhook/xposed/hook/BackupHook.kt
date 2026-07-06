@@ -140,8 +140,8 @@ object BackupHook {
 
     // ── Helpers ──
 
-    private fun copyDirRecursive(src: File, dst: File): Pair<Int, Long> {
-        var count = 0; var size = 0L
+    private fun copyDirRecursive(src: File, dst: File): Pair<Long, Long> {
+        var count = 0L; var size = 0L
         src.listFiles()?.forEach { file ->
             if (file.isDirectory) {
                 val sub = File(dst, file.name); sub.mkdirs()
@@ -155,8 +155,8 @@ object BackupHook {
         return Pair(count, size)
     }
 
-    private fun copyDirIncremental(src: File, dst: File, lastTime: Long): Triple<Int, Long, Int> {
-        var count = 0; var size = 0L; var newCount = 0
+    private fun copyDirIncremental(src: File, dst: File, lastTime: Long): Triple<Long, Long, Int> {
+        var count = 0L; var size = 0L; var newCount = 0
         src.listFiles()?.forEach { file ->
             if (file.isDirectory) {
                 val sub = File(dst, file.name); sub.mkdirs()
@@ -177,7 +177,7 @@ object BackupHook {
         Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd)).waitFor()
     }
 
-    private fun saveState(dir: String, tag: String, count: Int, size: Long) {
+    private fun saveState(dir: String, tag: String, count: Long, size: Long) {
         val state = org.json.JSONObject()
         state.put("lastBackupTime", System.currentTimeMillis())
         state.put("lastBackupTag", tag)
