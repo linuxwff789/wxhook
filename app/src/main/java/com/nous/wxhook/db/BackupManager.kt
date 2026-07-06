@@ -13,7 +13,7 @@ import java.util.Locale
  */
 object BackupManager {
 
-    private const val BACKUP_DIR = "/sdcard/Download/wxhook_backup"
+    const val BACKUP_DIR = "/sdcard/Download/wxhook_backup"
     private const val RECORDS_FILE = "backup_records.json"
     private const val STATE_FILE = "backup_state.json"
 

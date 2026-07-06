@@ -128,11 +128,9 @@ class ModuleActivity : AppCompatActivity() {
 
         Thread {
             val result = if (incremental) {
-                com.nous.wxhook.xposed.hook.BackupHook.setBackupDir(pathInput.text.toString().trim())
-                com.nous.wxhook.xposed.hook.BackupHook.doIncrementalBackup()
+                BackupHookLocal.doIncrementalBackup(pathInput.text.toString().trim())
             } else {
-                com.nous.wxhook.xposed.hook.BackupHook.setBackupDir(pathInput.text.toString().trim())
-                com.nous.wxhook.xposed.hook.BackupHook.doFullBackup()
+                BackupHookLocal.doFullBackup(pathInput.text.toString().trim())
             }
 
             handler.post {
