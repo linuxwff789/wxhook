@@ -1,6 +1,5 @@
 package com.nous.wxhook.ui.module
 
-import de.robv.android.xposed.XposedBridge
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File

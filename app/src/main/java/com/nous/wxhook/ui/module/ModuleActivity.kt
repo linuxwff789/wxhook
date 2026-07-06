@@ -135,7 +135,7 @@ class ModuleActivity : AppCompatActivity() {
 
             handler.post {
                 if (result.success) {
-                    val sizeStr = BackupManager.formatSize(result.totalSize)
+                    val sizeStr = "备份完成"
                     log("✅ ${result.message} ($sizeStr)")
                 } else {
                     log("❌ ${result.message}")
