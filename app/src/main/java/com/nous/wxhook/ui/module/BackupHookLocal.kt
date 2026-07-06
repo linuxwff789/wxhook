@@ -23,7 +23,7 @@ object BackupHookLocal {
         fun onProgress(current: String, fileCount: Long, totalSize: Long)
     }
 
-    fun doFullBackup(backupDir: String, callback: ProgressCallback? = null): Result {
+    fun doFullBackup(backupDir: String, callback: ProgressCallback? = null, compress: Boolean = true): Result {
         return try {
             val dir = File(backupDir); if (!dir.exists()) dir.mkdirs()
             val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
@@ -36,8 +36,8 @@ object BackupHookLocal {
             callback?.onProgress("备份数据库...", fileCount, totalSize)
             val dbSrc = File("/sdcard/Download/EnMicroMsg.db")
             if (dbSrc.exists()) {
-                val dbDst = File(dir, "EnMicroMsg_$tag.db.gz")
-                compressFile(dbSrc, dbDst)
+                val dbDst = if (compress) File(dir, "EnMicroMsg_$tag.db.gz") else File(dir, "EnMicroMsg_$tag.db")
+                if (compress) compressFile(dbSrc, dbDst) else copyFile(dbSrc, dbDst)
                 dbSize = dbDst.length(); fileCount++; totalSize += dbSize
             }
 
@@ -59,7 +59,7 @@ object BackupHookLocal {
         } catch (e: Exception) { Result(false, "备份失败: ${e.message}") }
     }
 
-    fun doIncrementalBackup(backupDir: String, callback: ProgressCallback? = null): Result {
+    fun doIncrementalBackup(backupDir: String, callback: ProgressCallback? = null, compress: Boolean = true): Result {
         return try {
             val dir = File(backupDir); if (!dir.exists()) dir.mkdirs()
             val state = loadState(backupDir)
@@ -73,9 +73,10 @@ object BackupHookLocal {
             callback?.onProgress("检查数据库...", fileCount, totalSize)
             val dbSrc = File("/sdcard/Download/EnMicroMsg.db")
             if (dbSrc.exists() && dbSrc.lastModified() > lastTime) {
-                val dbDst = File(dir, "EnMicroMsg_$tag.db.gz")
-                dir.listFiles()?.filter { it.name.startsWith("EnMicroMsg_") && it.name.endsWith(".db.gz") }?.forEach { it.delete() }
-                compressFile(dbSrc, dbDst)
+                val ext = if (compress) ".db.gz" else ".db"
+                val dbDst = File(dir, "EnMicroMsg_$tag$ext")
+                dir.listFiles()?.filter { it.name.startsWith("EnMicroMsg_") && (it.name.endsWith(".db.gz") || it.name.endsWith(".db")) }?.forEach { it.delete() }
+                if (compress) compressFile(dbSrc, dbDst) else copyFile(dbSrc, dbDst)
                 dbSize = dbDst.length(); fileCount++; totalSize += dbSize; newFiles++
             }
 
@@ -107,6 +108,10 @@ object BackupHookLocal {
             proc.waitFor()
             if (pid.isEmpty()) null else pid
         } catch (e: Exception) { null }
+    }
+
+    private fun copyFile(src: File, dst: File) {
+        FileInputStream(src).use { input -> FileOutputStream(dst).use { output -> input.copyTo(output, bufferSize = 65536) } }
     }
 
     private fun compressFile(src: File, dst: File) {

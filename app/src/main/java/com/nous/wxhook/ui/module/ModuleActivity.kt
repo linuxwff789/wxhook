@@ -87,16 +87,23 @@ class ModuleActivity : AppCompatActivity() {
         root.addView(makeCardTitle("💾 备份"))
         val backupCard = makeCard()
 
+        // 压缩开关
+        val compressRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(12), dp(8), dp(12), dp(4)); gravity = Gravity.CENTER_VERTICAL }
+        compressRow.addView(TextView(this).apply { text = "压缩备份 (gzip)"; textSize = 14f; layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) })
+        val compressSwitch = Switch(this).apply { isChecked = true }
+        compressRow.addView(compressSwitch)
+        backupCard.addView(compressRow)
+
         backupBtn = Button(this).apply {
             text = "全量备份 (DB + 附件)"
-            setOnClickListener { doBackup(false) }
+            setOnClickListener { doBackup(false, compressSwitch.isChecked) }
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(12), dp(8), dp(12), dp(4)) }
         }
         backupCard.addView(backupBtn)
 
         incrBtn = Button(this).apply {
             text = "增量备份 (仅新文件)"
-            setOnClickListener { doBackup(true) }
+            setOnClickListener { doBackup(true, compressSwitch.isChecked) }
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(12), dp(4), dp(12), dp(8)) }
         }
         backupCard.addView(incrBtn)
@@ -120,7 +127,7 @@ class ModuleActivity : AppCompatActivity() {
         setContentView(sv)
     }
 
-    private fun doBackup(incremental: Boolean) {
+    private fun doBackup(incremental: Boolean, compress: Boolean = true) {
         if (isBackingUp) { log("⏳ 正在备份中..."); return }
         isBackingUp = true
         backupBtn.isEnabled = false; incrBtn.isEnabled = false
