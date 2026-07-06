@@ -100,7 +100,7 @@ object BackupHook {
             var dbSize = 0L
             var fileCount = 0L
             var totalSize = 0L
-            var newFiles = 0
+            var newFiles = 0L
 
             // Check DB
             val dbSrc = File("/sdcard/Download/EnMicroMsg.db")
@@ -191,5 +191,5 @@ object BackupHook {
         return if (f.exists()) try { org.json.JSONObject(f.readText()) } catch (e: Exception) { org.json.JSONObject() } else org.json.JSONObject()
     }
 
-    data class BackupResult(val success: Boolean, val dbSize: Long, val fileCount: Long, val totalSize: Long, val newFiles: Int, val message: String)
+    data class BackupResult(val success: Boolean, val dbSize: Long, val fileCount: Long, val totalSize: Long, val newFiles: Long, val message: String)
 }
