@@ -19,12 +19,16 @@ import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.lang.reflect.Proxy
 
+/**
+ * Inject wxhook entry into WeChat settings.
+ * Strategy: onResume → find RecyclerView → get adapter via getter → wrap with Proxy → inject item.
+ */
 object SettingsEntryHook {
 
     private const val TAG = "wxhook:Hook"
     private const val WXHOOK_PKG = "com.nous.wxhook"
-    private const val VIEW_TYPE = 99999
     private val handler = Handler(Looper.getMainLooper())
+    private var injected = false
 
     fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != "com.tencent.mm") return
@@ -37,7 +41,8 @@ object SettingsEntryHook {
                     val activity = param.thisObject as? Activity ?: return
                     val name = activity.javaClass.name
                     if (name.contains("Settings") || name.contains("settings")) {
-                        handler.postDelayed({ inject(activity) }, 500)
+                        injected = false
+                        handler.postDelayed({ inject(activity) }, 600)
                     }
                 }
             })
@@ -45,9 +50,9 @@ object SettingsEntryHook {
     }
 
     private fun inject(activity: Activity) {
+        if (injected) return
         try {
             val root = activity.findViewById<View>(android.R.id.content) as? ViewGroup ?: return
-            if (root.findViewWithTag<View>("wxhook_item") != null) return
 
             // Find RecyclerView
             val rv = findByClassName(root, "RecyclerView") ?: run {
@@ -55,45 +60,136 @@ object SettingsEntryHook {
                 return
             }
 
-            // Get the adapter
-            val adapterField = rv.javaClass.getDeclaredField("mAdapter").apply { isAccessible = true }
-            val adapter = adapterField.get(rv) ?: run {
-                XposedBridge.log("$TAG no adapter")
+            // Try to get adapter via reflection (multiple field names)
+            var adapter: Any? = null
+            val rvClass = rv.javaClass
+
+            // Try common field names
+            for (fieldName in listOf("mAdapter", "adapter", "mWrapAdapter", "mOuterAdapter")) {
+                try {
+                    val f = findFieldRecursive(rvClass, fieldName)
+                    if (f != null) {
+                        f.isAccessible = true
+                        adapter = f.get(rv)
+                        if (adapter != null) {
+                            XposedBridge.log("$TAG found adapter via field: $fieldName")
+                            break
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Try getAdapter() method
+            if (adapter == null) {
+                try {
+                    val m = rvClass.getMethod("getAdapter")
+                    adapter = m.invoke(rv)
+                    XposedBridge.log("$TAG found adapter via getAdapter()")
+                } catch (_: Exception) {}
+            }
+
+            if (adapter == null) {
+                XposedBridge.log("$TAG no adapter found")
+                // Fallback: add item below RecyclerView
+                val parent = rv.parent as? ViewGroup
+                if (parent != null) {
+                    parent.addView(createItem(activity), parent.indexOfChild(rv) + 1)
+                    injected = true
+                    XposedBridge.log("$TAG fallback: added below RecyclerView")
+                }
                 return
             }
 
             // Check if already wrapped
-            if (adapter.javaClass.name.contains("WxhookProxy")) return
+            if (adapter.javaClass.name.contains("Wxhook")) return
 
-            // Get the original adapter class's interfaces
-            val adapterInterfaces = adapter.javaClass.interfaces
-
-            // Create a dynamic proxy
-            val proxy = Proxy.newProxyInstance(
-                adapter.javaClass.classLoader,
-                adapterInterfaces
+            // Wrap adapter with Proxy
+            val original = adapter
+            val wrapped = Proxy.newProxyInstance(
+                original.javaClass.classLoader,
+                original.javaClass.interfaces
             ) { _, method, args ->
                 when (method.name) {
                     "getItemCount" -> {
-                        val orig = method.invoke(adapter, *(args ?: emptyArray())) as Int
+                        val orig = method.invoke(original, *(args ?: emptyArray())) as Int
                         orig + 1
                     }
                     "getItemViewType" -> {
-                        val pos = args?.get(0) as? Int ?: return@newProxyInstance method.invoke(adapter, *(args ?: emptyArray()))
-                        if (pos == 0) VIEW_TYPE else method.invoke(adapter, *(args ?: emptyArray()))
+                        val pos = args?.get(0) as? Int ?: 0
+                        if (pos == 0) 99999 else method.invoke(original, *(args ?: emptyArray()))
                     }
-                    "getItemCount" -> method.invoke(adapter, *(args ?: emptyArray()))
-                    else -> method.invoke(adapter, *(args ?: emptyArray()))
+                    "onCreateViewHolder" -> {
+                        val vt = args?.get(1) as? Int ?: 0
+                        if (vt == 99999) {
+                            // Create ViewHolder for our item
+                            val holderCls = Class.forName("androidx.recyclerview.widget.RecyclerView\$ViewHolder")
+                            val holder = createViewHolder(activity)
+                            holder
+                        } else {
+                            method.invoke(original, *(args ?: emptyArray()))
+                        }
+                    }
+                    "onBindViewHolder" -> {
+                        val holder = args?.get(0)
+                        val pos = args?.get(1) as? Int ?: 0
+                        if (pos == 0 && holder != null) {
+                            val iv = holderCls_getItemView(holder)
+                            if (iv != null && iv.tag != "wxhook_item") {
+                                // Bind our item
+                            }
+                            null
+                        } else {
+                            method.invoke(original, *(args ?: emptyArray()))
+                        }
+                    }
+                    else -> method.invoke(original, *(args ?: emptyArray()))
                 }
             }
 
-            // Set the proxy as adapter
-            adapterField.set(rv, proxy)
+            // Set wrapped adapter
+            val setAdapterMethod = rvClass.getMethod("setAdapter", Class.forName("androidx.recyclerview.widget.RecyclerView\$Adapter"))
+            setAdapterMethod.invoke(rv, wrapped)
 
+            injected = true
             XposedBridge.log("$TAG adapter wrapped!")
         } catch (e: Exception) {
             XposedBridge.log("$TAG error: $e")
+            // Fallback
+            tryAddBelowRecyclerView(activity)
         }
+    }
+
+    private fun tryAddBelowRecyclerView(activity: Activity) {
+        try {
+            val root = activity.findViewById<View>(android.R.id.content) as? ViewGroup ?: return
+            if (root.findViewWithTag<View>("wxhook_item") != null) return
+            val rv = findByClassName(root, "RecyclerView") ?: return
+            val parent = rv.parent as? ViewGroup ?: return
+            parent.addView(createItem(activity), parent.indexOfChild(rv) + 1)
+            injected = true
+            XposedBridge.log("$TAG fallback: added below RecyclerView")
+        } catch (e: Exception) {
+            XposedBridge.log("$TAG fallback error: $e")
+        }
+    }
+
+    private fun createViewHolder(activity: Activity): Any {
+        // Use reflection to create a proper ViewHolder
+        val item = createItem(activity)
+        val holderCls = Class.forName("androidx.recyclerview.widget.RecyclerView\$ViewHolder")
+        return holderCls.getConstructor(View::class.java).newInstance(item)
+    }
+
+    private fun findFieldRecursive(cls: Class<*>, name: String): java.lang.reflect.Field? {
+        var c: Class<*>? = cls
+        while (c != null) {
+            try {
+                return c.getDeclaredField(name)
+            } catch (_: NoSuchFieldException) {
+                c = c.superclass
+            }
+        }
+        return null
     }
 
     private fun findByClassName(view: ViewGroup, name: String): View? {
@@ -121,10 +217,7 @@ object SettingsEntryHook {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(16), dp(14), dp(16), dp(14))
             setBackgroundColor(bgColor)
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         val iconBg = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF6200EE.toInt()); setSize(dp(36), dp(36)) }
         row.addView(TextView(activity).apply { text = "⚙"; textSize = 16f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; background = iconBg; layoutParams = LinearLayout.LayoutParams(dp(36), dp(36)) })
@@ -133,7 +226,14 @@ object SettingsEntryHook {
         textArea.addView(TextView(activity).apply { text = "备份 · 定时备份 · 模块状态"; textSize = 12f; setTextColor(subColor) })
         row.addView(textArea)
         row.addView(TextView(activity).apply { text = "›"; textSize = 20f; setTextColor(arrowColor); gravity = Gravity.CENTER })
-        row.setOnClickListener { try { it.context.startActivity(Intent().apply { component = ComponentName(WXHOOK_PKG, "$WXHOOK_PKG.ui.module.ModuleActivity"); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }) } catch (e: Exception) { XposedBridge.log("$TAG startActivity: $e") } }
+        row.setOnClickListener {
+            try {
+                it.context.startActivity(Intent().apply {
+                    component = ComponentName(WXHOOK_PKG, "$WXHOOK_PKG.ui.module.ModuleActivity")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            } catch (e: Exception) { XposedBridge.log("$tag startActivity: $e") }
+        }
         return row
     }
 
