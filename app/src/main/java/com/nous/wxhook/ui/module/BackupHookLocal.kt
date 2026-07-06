@@ -11,20 +11,29 @@ import java.util.Locale
 import java.util.zip.GZIPOutputStream
 
 /**
- * Local backup for Manager App (no Xposed dependency).
+ * Local backup for Manager App.
+ * Uses su -c cp to access WeChat files (verified working).
  */
 object BackupHookLocal {
 
     private const val RECORDS_FILE = "backup_records.json"
     private const val STATE_FILE = "backup_state.json"
 
-    fun doFullBackup(backupDir: String): Result {
+    interface ProgressCallback {
+        fun onProgress(current: String, fileCount: Long, totalSize: Long)
+    }
+
+    fun doFullBackup(backupDir: String, callback: ProgressCallback? = null): Result {
         return try {
             val dir = File(backupDir); if (!dir.exists()) dir.mkdirs()
             val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             var dbSize = 0L; var fileCount = 0L; var totalSize = 0L
 
-            // Backup DB
+            // Get WeChat PID
+            val pid = getWxPid() ?: return Result(false, "微信未运行")
+
+            // Backup DB (gzip)
+            callback?.onProgress("备份数据库...", fileCount, totalSize)
             val dbSrc = File("/sdcard/Download/EnMicroMsg.db")
             if (dbSrc.exists()) {
                 val dbDst = File(dir, "EnMicroMsg_$tag.db.gz")
@@ -32,16 +41,16 @@ object BackupHookLocal {
                 dbSize = dbDst.length(); fileCount++; totalSize += dbSize
             }
 
-            // Backup attachments
-            val wxBase = findWxDataPath()
-            if (wxBase != null) {
-                for (attDir in listOf("image2", "voice2", "video", "cdn")) {
-                    val src = File(wxBase, attDir)
-                    if (src.exists()) {
-                        val r = copyDirRecursive(src, File(dir, attDir))
-                        fileCount += r.first; totalSize += r.second
-                    }
-                }
+            // Backup attachments via su
+            val wxBase = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
+            val attDirs = listOf("image2", "voice2", "video", "cdn")
+
+            for (attDir in attDirs) {
+                callback?.onProgress("备份 $attDir...", fileCount, totalSize)
+                val dst = File(dir, attDir)
+                if (!dst.exists()) dst.mkdirs()
+                val count = copyDirSu(wxBase, attDir, dst)
+                fileCount += count.first; totalSize += count.second
             }
 
             saveState(tag, fileCount, totalSize)
@@ -50,7 +59,7 @@ object BackupHookLocal {
         } catch (e: Exception) { Result(false, "备份失败: ${e.message}") }
     }
 
-    fun doIncrementalBackup(backupDir: String): Result {
+    fun doIncrementalBackup(backupDir: String, callback: ProgressCallback? = null): Result {
         return try {
             val dir = File(backupDir); if (!dir.exists()) dir.mkdirs()
             val state = loadState(backupDir)
@@ -58,6 +67,10 @@ object BackupHookLocal {
             val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             var dbSize = 0L; var fileCount = 0L; var totalSize = 0L; var newFiles = 0L
 
+            val pid = getWxPid() ?: return Result(false, "微信未运行")
+
+            // Check DB
+            callback?.onProgress("检查数据库...", fileCount, totalSize)
             val dbSrc = File("/sdcard/Download/EnMicroMsg.db")
             if (dbSrc.exists() && dbSrc.lastModified() > lastTime) {
                 val dbDst = File(dir, "EnMicroMsg_$tag.db.gz")
@@ -66,15 +79,16 @@ object BackupHookLocal {
                 dbSize = dbDst.length(); fileCount++; totalSize += dbSize; newFiles++
             }
 
-            val wxBase = findWxDataPath()
-            if (wxBase != null) {
-                for (attDir in listOf("image2", "voice2", "video", "cdn")) {
-                    val src = File(wxBase, attDir)
-                    if (src.exists()) {
-                        val r = copyDirIncremental(src, File(dir, attDir), lastTime)
-                        fileCount += r.first; totalSize += r.second; newFiles += r.third
-                    }
-                }
+            // Incremental attachments
+            val wxBase = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
+            val attDirs = listOf("image2", "voice2", "video", "cdn")
+
+            for (attDir in attDirs) {
+                callback?.onProgress("增量 $attDir...", fileCount, totalSize)
+                val dst = File(dir, attDir)
+                if (!dst.exists()) dst.mkdirs()
+                val count = copyDirIncrementalSu(wxBase, attDir, dst, lastTime)
+                fileCount += count.first; totalSize += count.second; newFiles += count.third
             }
 
             saveState(tag, fileCount, totalSize)
@@ -84,44 +98,95 @@ object BackupHookLocal {
         } catch (e: Exception) { Result(false, "增量备份失败: ${e.message}") }
     }
 
-    private fun findWxDataPath(): String? {
-        val basePath = "/data/data/com.tencent.mm/MicroMsg"
-        val baseDir = File(basePath)
-        if (!baseDir.exists()) return null
-        baseDir.listFiles()?.forEach { dir ->
-            if (dir.isDirectory && File(dir, "EnMicroMsg.db").exists()) return dir.absolutePath
-        }
-        return null
+    // ── Helpers ──
+
+    private fun getWxPid(): String? {
+        return try {
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
+            val pid = proc.inputStream.bufferedReader().readText().trim()
+            proc.waitFor()
+            if (pid.isEmpty()) null else pid
+        } catch (e: Exception) { null }
     }
 
     private fun compressFile(src: File, dst: File) {
-        FileInputStream(src).use { input -> GZIPOutputStream(FileOutputStream(dst)).use { output -> input.copyTo(output, bufferSize = 8192) } }
+        FileInputStream(src).use { input ->
+            GZIPOutputStream(FileOutputStream(dst)).use { output ->
+                input.copyTo(output, bufferSize = 65536)
+            }
+        }
     }
 
-    private fun copyDirRecursive(src: File, dst: File): Pair<Long, Long> {
+    /**
+     * Copy directory via su (recursive)
+     * @return Pair(fileCount, totalSize)
+     */
+    private fun copyDirSu(wxBase: String, attDir: String, dstDir: File): Pair<Long, Long> {
+        val srcPath = "$wxBase/$attDir"
+        // Get file list via su
+        val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "find '$srcPath' -type f 2>/dev/null"))
+        val files = proc.inputStream.bufferedReader().readLines()
+        proc.waitFor()
+
         var count = 0L; var size = 0L
-        src.listFiles()?.forEach { file ->
-            if (file.isDirectory) { val sub = File(dst, file.name); sub.mkdirs(); val r = copyDirRecursive(file, sub); count += r.first; size += r.second }
-            else { val dstFile = File(dst, file.name); FileInputStream(file).use { i -> FileOutputStream(dstFile).use { o -> i.copyTo(o, bufferSize = 8192) } }; dstFile.setReadable(true, false); count++; size += file.length() }
+        for (filePath in files) {
+            if (filePath.isBlank()) continue
+            val relPath = filePath.removePrefix("$srcPath/")
+            val dstFile = File(dstDir, relPath)
+            dstFile.parentFile?.mkdirs()
+
+            // Copy via su
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "cp '$filePath' '${dstFile.absolutePath}' && chmod 644 '${dstFile.absolutePath}'")).waitFor()
+
+            if (dstFile.exists()) {
+                count++
+                size += dstFile.length()
+            }
         }
         return Pair(count, size)
     }
 
-    private fun copyDirIncremental(src: File, dst: File, lastTime: Long): Triple<Long, Long, Int> {
+    /**
+     * Incremental copy via su
+     * @return Triple(fileCount, totalSize, newFileCount)
+     */
+    private fun copyDirIncrementalSu(wxBase: String, attDir: String, dstDir: File, lastTime: Long): Triple<Long, Long, Int> {
+        val srcPath = "$wxBase/$attDir"
+        val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "find '$srcPath' -type f -newer /proc/1/cmdline 2>/dev/null"))
+        // Simpler: get all files, check modification via ls -l
+        val proc2 = Runtime.getRuntime().exec(arrayOf("su", "-c", "find '$srcPath' -type f 2>/dev/null"))
+        val files = proc2.inputStream.bufferedReader().readLines()
+        proc2.waitFor()
+
         var count = 0L; var size = 0L; var newCount = 0
-        src.listFiles()?.forEach { file ->
-            if (file.isDirectory) { val sub = File(dst, file.name); sub.mkdirs(); val r = copyDirIncremental(file, sub, lastTime); count += r.first; size += r.second; newCount += r.third }
-            else { val dstFile = File(dst, file.name); if (file.lastModified() > lastTime || !dstFile.exists()) { FileInputStream(file).use { i -> FileOutputStream(dstFile).use { o -> i.copyTo(o, bufferSize = 8192) } }; dstFile.setReadable(true, false); newCount++ }; count++; size += file.length() }
+        for (filePath in files) {
+            if (filePath.isBlank()) continue
+            val relPath = filePath.removePrefix("$srcPath/")
+            val dstFile = File(dstDir, relPath)
+
+            // Check if file needs copying (newer or missing)
+            if (!dstFile.exists() || dstFile.lastModified() < lastTime) {
+                dstFile.parentFile?.mkdirs()
+                Runtime.getRuntime().exec(arrayOf("su", "-c", "cp '$filePath' '${dstFile.absolutePath}' && chmod 644 '${dstFile.absolutePath}'")).waitFor()
+                if (dstFile.exists()) newCount++
+            }
+            count++
+            if (dstFile.exists()) size += dstFile.length()
         }
         return Triple(count, size, newCount)
     }
 
     private fun createRecord(tag: String, type: String, dbSize: Long, fileCount: Long, totalSize: Long, message: String): JSONObject {
-        return JSONObject().apply { put("tag", tag); put("type", type); put("time", System.currentTimeMillis()); put("dbSize", dbSize); put("fileCount", fileCount); put("totalSize", totalSize); put("message", message) }
+        return JSONObject().apply {
+            put("tag", tag); put("type", type); put("time", System.currentTimeMillis())
+            put("dbSize", dbSize); put("fileCount", fileCount); put("totalSize", totalSize); put("message", message)
+        }
     }
 
     private fun addRecord(record: JSONObject) {
-        val f = File(com.nous.wxhook.db.BackupManager.BACKUP_DIR, RECORDS_FILE)
+        val dir = File(com.nous.wxhook.db.BackupManager.BACKUP_DIR)
+        if (!dir.exists()) dir.mkdirs()
+        val f = File(dir, RECORDS_FILE)
         val arr = try { JSONArray(f.readText()) } catch (e: Exception) { JSONArray() }
         arr.put(record); while (arr.length() > 50) arr.remove(0)
         f.writeText(arr.toString())
