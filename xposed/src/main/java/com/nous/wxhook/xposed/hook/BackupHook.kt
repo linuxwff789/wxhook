@@ -35,7 +35,7 @@ object BackupHook {
             if (pid.isEmpty()) return null
             "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
         } catch (e: Exception) {
-            XposedBridge.log("$tag getWxDataPath error: $e")
+            XposedBridge.log("$TAG getWxDataPath error: $e")
             null
         }
     }
@@ -50,7 +50,7 @@ object BackupHook {
 
             val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             var dbSize = 0L
-            var fileCount = 0
+            var fileCount = 0L
             var totalSize = 0L
 
             // Backup DB
@@ -61,7 +61,7 @@ object BackupHook {
                 dbSize = dbDst.length()
                 fileCount++
                 totalSize += dbSize
-                XposedBridge.log("$tag DB: ${dbDst.name} ($dbSize bytes)")
+                XposedBridge.log("$TAG DB: ${dbDst.name} ($dbSize bytes)")
             }
 
             // Backup attachments
@@ -74,14 +74,14 @@ object BackupHook {
                     val count = copyDirRecursive(src, File(dir, attDir))
                     fileCount += count.first
                     totalSize += count.second
-                    XposedBridge.log("$tag $attDir: ${count.first} files")
+                    XposedBridge.log("$TAG $attDir: ${count.first} files")
                 }
             }
 
             saveState(backupDir, tag, fileCount, totalSize)
             BackupResult(true, dbSize, fileCount, totalSize, fileCount, "全量备份完成: ${fileCount}个文件")
         } catch (e: Exception) {
-            XposedBridge.log("$tag fullBackup error: $e")
+            XposedBridge.log("$TAG fullBackup error: $e")
             BackupResult(false, 0, 0, 0, 0, "备份失败: ${e.message}")
         }
     }
@@ -98,7 +98,7 @@ object BackupHook {
             val lastBackupTime = state.optLong("lastBackupTime", 0L)
             val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             var dbSize = 0L
-            var fileCount = 0
+            var fileCount = 0L
             var totalSize = 0L
             var newFiles = 0
 
@@ -133,7 +133,7 @@ object BackupHook {
             val msg = if (newFiles > 0) "增量备份: ${newFiles}个新文件" else "无新文件"
             BackupResult(true, dbSize, fileCount, totalSize, newFiles, msg)
         } catch (e: Exception) {
-            XposedBridge.log("$tag incrementalBackup error: $e")
+            XposedBridge.log("$TAG incrementalBackup error: $e")
             BackupResult(false, 0, 0, 0, 0, "增量备份失败: ${e.message}")
         }
     }
