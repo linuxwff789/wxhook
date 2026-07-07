@@ -55,6 +55,14 @@ class ModuleActivity : AppCompatActivity() {
         val statusCard = makeCard()
         val statusText = TextView(this).apply { textSize = 13f; setPadding(dp(12), dp(8), dp(12), dp(8)); typeface = Typeface.MONOSPACE }
         statusText.text = getStatusText()
+
+        // 检测按钮
+        val checkBtn = Button(this).apply {
+            text = "🔍 检测环境"
+            setOnClickListener { checkEnvironment(statusText) }
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(12), dp(4), dp(12), dp(8)) }
+        }
+        statusCard.addView(checkBtn)
         statusCard.addView(statusText)
         root.addView(statusCard)
 
@@ -200,6 +208,72 @@ class ModuleActivity : AppCompatActivity() {
         sb.appendLine("  最后备份: ${BackupManager.formatTime(info.optLong("lastBackupTime", 0))}")
 
         return sb.toString()
+    }
+
+    private fun checkEnvironment(statusText: TextView) {
+        Thread {
+            val sb = StringBuilder()
+            sb.appendLine("=== 环境检测 ===")
+
+            // 1. Root 检测
+            try {
+                val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+                val output = proc.inputStream.bufferedReader().readText().trim()
+                val exit = proc.waitFor()
+                if (exit == 0 && output.contains("uid=0")) {
+                    sb.appendLine("✅ Root: 正常 (${output})")
+                } else {
+                    sb.appendLine("❌ Root: 失败 (exit=$exit)")
+                }
+            } catch (e: Exception) {
+                sb.appendLine("❌ Root: 异常 (${e.message})")
+            }
+
+            // 2. 微信进程检测
+            try {
+                val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
+                val pid = proc.inputStream.bufferedReader().readText().trim()
+                proc.waitFor()
+                if (pid.isNotEmpty()) {
+                    sb.appendLine("✅ 微信: 运行中 (pid=$pid)")
+                } else {
+                    sb.appendLine("❌ 微信: 未运行")
+                }
+            } catch (e: Exception) {
+                sb.appendLine("❌ 微信: 检测失败")
+            }
+
+            // 3. 文件访问检测
+            try {
+                val dbFile = File("/sdcard/Download/EnMicroMsg.db")
+                if (dbFile.exists()) {
+                    sb.appendLine("✅ 数据库: 存在 (${BackupManager.formatSize(dbFile.length())})")
+                } else {
+                    sb.appendLine("⚠️ 数据库: 不存在")
+                }
+            } catch (e: Exception) {
+                sb.appendLine("❌ 数据库: 检测失败")
+            }
+
+            // 4. 备份目录检测
+            val backupDir = File(pathInput.text.toString().trim())
+            sb.appendLine("${if (backupDir.exists()) "✅" else "⚠️"} 备份目录: ${backupDir.absolutePath}")
+
+            // 5. 密钥检测
+            try {
+                val keyFile = File("/data/local/tmp/.wechat_key")
+                if (keyFile.exists()) {
+                    val key = keyFile.readText().lines().find { it.startsWith("key=") } ?: "未知"
+                    sb.appendLine("✅ 密钥: $key")
+                } else {
+                    sb.appendLine("⚠️ 密钥: 未捕获")
+                }
+            } catch (e: Exception) {
+                sb.appendLine("❌ 密钥: 读取失败")
+            }
+
+            handler.post { statusText.text = sb.toString() }
+        }.start()
     }
 
     private fun log(msg: String) {
