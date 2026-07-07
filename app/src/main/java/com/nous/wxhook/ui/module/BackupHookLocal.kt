@@ -56,6 +56,7 @@ object BackupHookLocal {
                 fileCount += count.first; totalSize += count.second
             }
 
+            android.util.Log.i("wxhook:Backup", "Backup done: fileCount=$fileCount, totalSize=$totalSize")
             saveState(tag, fileCount, totalSize)
             addRecord(createRecord(tag, "full", dbSize, fileCount, totalSize, "全量备份完成"))
             Result(true, "全量备份完成: ${fileCount}个文件, ${formatSize(totalSize)}")
@@ -95,6 +96,7 @@ object BackupHookLocal {
                 fileCount += count.first; totalSize += count.second; newFiles += count.third
             }
 
+            android.util.Log.i("wxhook:Backup", "Backup done: fileCount=$fileCount, totalSize=$totalSize")
             saveState(tag, fileCount, totalSize)
             addRecord(createRecord(tag, "incremental", dbSize, fileCount, totalSize, if (newFiles > 0) "增量: ${newFiles}个新文件" else "无新文件"))
             val msg = if (newFiles > 0) "增量备份: ${newFiles}个新文件, ${formatSize(totalSize)}" else "无新文件"
@@ -150,12 +152,15 @@ object BackupHookLocal {
     }
 
     private fun copyDirJava(wxBase: String, attDir: String, dstDir: File): Pair<Long, Long> {
+        android.util.Log.i("wxhook:Backup", "copyDirJava start: src=$wxBase/$attDir")
         android.util.Log.i("wxhook:Backup", "copyDirJava: src=$wxBase/$attDir, dst=${dstDir.absolutePath}")
         val srcDir = File("$wxBase/$attDir")
-        if (!srcDir.exists()) return Pair(0, 0)
+        if (!srcDir.exists()) { android.util.Log.w("wxhook:Backup", "srcDir not exists: ${srcDir.absolutePath}"); return Pair(0, 0) }
 
+        val files = srcDir.listFiles()
+        android.util.Log.i("wxhook:Backup", "srcDir files: ${files?.size ?: 0}")
         var count = 0L; var size = 0L
-        srcDir.listFiles()?.forEach { file ->
+        files?.forEach { file ->
             if (file.isDirectory) {
                 val sub = File(dstDir, file.name); sub.mkdirs()
                 val r = copyDirJava("$wxBase/$attDir/${file.name}", "", sub)
@@ -207,6 +212,7 @@ object BackupHookLocal {
     }
 
     private fun addRecord(record: JSONObject) {
+        android.util.Log.i("wxhook:Backup", "addRecord called")
         val dir = File(com.nous.wxhook.db.BackupManager.BACKUP_DIR)
         if (!dir.exists()) dir.mkdirs()
         val f = File(dir, RECORDS_FILE)
