@@ -229,7 +229,44 @@ class ModuleActivity : AppCompatActivity() {
                 sb.appendLine("❌ Root: 异常 (${e.message})")
             }
 
-            // 2. 微信进程检测
+            // 2. Xposed 模块检测
+            try {
+                // 检查 Xposed 模块包是否存在
+                val xpPkg = "com.nous.wxhook.xposed"
+                val xpProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "pm list packages | grep $xpPkg"))
+                val xpOutput = xpProc.inputStream.bufferedReader().readText().trim()
+                xpProc.waitFor()
+                if (xpOutput.contains(xpPkg)) {
+                    sb.appendLine("✅ Xposed 模块: 已安装")
+                } else {
+                    sb.appendLine("❌ Xposed 模块: 未安装")
+                }
+
+                // 检查 LSPosed 是否加载了模块
+                val lsProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls /data/adb/lspd/modules/"))
+                val lsOutput = lsProc.inputStream.bufferedReader().readText().trim()
+                lsProc.waitFor()
+                if (lsOutput.contains("wxhook")) {
+                    sb.appendLine("✅ LSPosed: 模块已注册")
+                } else {
+                    sb.appendLine("⚠️ LSPosed: 模块未注册")
+                }
+
+                // 检查 Xposed 日志
+                val logProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "logcat -d | grep 'wxhook:Hook' | tail -1"))
+                val logOutput = logProc.inputStream.bufferedReader().readText().trim()
+                logProc.waitFor()
+                if (logOutput.isNotEmpty()) {
+                    sb.appendLine("✅ Xposed Hook: 已加载")
+                    sb.appendLine("   $logOutput")
+                } else {
+                    sb.appendLine("⚠️ Xposed Hook: 未检测到日志")
+                }
+            } catch (e: Exception) {
+                sb.appendLine("❌ Xposed: 检测失败")
+            }
+
+            // 3. 微信进程检测
             try {
                 val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
                 val pid = proc.inputStream.bufferedReader().readText().trim()
