@@ -136,6 +136,7 @@ class ModuleActivity : AppCompatActivity() {
     }
 
     private fun doBackup(incremental: Boolean, compress: Boolean = true) {
+        android.util.Log.i("wxhook:Backup", "doBackup clicked: incremental=$incremental")
         if (isBackingUp) { log("⏳ 正在备份中..."); return }
         isBackingUp = true
         backupBtn.isEnabled = false; incrBtn.isEnabled = false
@@ -320,6 +321,7 @@ class ModuleActivity : AppCompatActivity() {
     }
 
     private fun log(msg: String) {
+        android.util.Log.i("wxhook:Backup", msg)
         val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         logView.text = "[$time] $msg\n${logView.text}"
     }

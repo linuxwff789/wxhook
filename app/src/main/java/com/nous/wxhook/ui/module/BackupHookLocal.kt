@@ -26,6 +26,7 @@ object BackupHookLocal {
     }
 
     fun doFullBackup(backupDir: String, callback: ProgressCallback? = null, compress: Boolean = true): Result {
+        android.util.Log.i("wxhook:Backup", "doFullBackup called: dir=$backupDir, compress=$compress")
         return try {
             val dir = File(backupDir); if (!dir.exists()) dir.mkdirs()
             val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
@@ -104,6 +105,7 @@ object BackupHookLocal {
     // ── Helpers ──
 
     private fun getWxPid(): String? {
+        android.util.Log.i("wxhook:Backup", "getWxPid called")
         // Try /proc approach first
         try {
             val procDir = File("/proc")
@@ -112,7 +114,7 @@ object BackupHookLocal {
                     val cmdline = File(dir, "cmdline")
                     if (cmdline.exists()) {
                         val content = cmdline.readText()
-                        if (content.contains("com.tencent.mm")) return dir.name
+                        if (content.contains("com.tencent.mm")) { android.util.Log.i("wxhook:Backup", "Found wx pid: ${dir.name}"); return dir.name }
                     }
                 }
             }
@@ -126,6 +128,7 @@ object BackupHookLocal {
             if (pid.isNotEmpty()) return pid
         } catch (_: Exception) {}
 
+        android.util.Log.i("wxhook:Backup", "getWxPid: no pid found")
         return null
     }
 
@@ -147,6 +150,7 @@ object BackupHookLocal {
     }
 
     private fun copyDirJava(wxBase: String, attDir: String, dstDir: File): Pair<Long, Long> {
+        android.util.Log.i("wxhook:Backup", "copyDirJava: src=$wxBase/$attDir, dst=${dstDir.absolutePath}")
         val srcDir = File("$wxBase/$attDir")
         if (!srcDir.exists()) return Pair(0, 0)
 
