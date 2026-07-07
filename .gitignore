@@ -21,4 +21,3 @@ gradlew.bat
 *.jks
 *.keystore
 keystore.properties
-release.keystore
