@@ -142,10 +142,16 @@ class ModuleActivity : AppCompatActivity() {
         backupBtn.text = "备份中..."; incrBtn.text = "备份中..."
 
         Thread {
+            val dir = pathInput.text.toString().trim()
+            val cb = object : BackupHookLocal.ProgressCallback {
+                override fun onProgress(current: String, fileCount: Long, totalSize: Long) {
+                    handler.post { log("⏳ $current") }
+                }
+            }
             val result = if (incremental) {
-                BackupHookLocal.doIncrementalBackup(pathInput.text.toString().trim())
+                BackupHookLocal.doIncrementalBackup(dir, cb)
             } else {
-                BackupHookLocal.doFullBackup(pathInput.text.toString().trim())
+                BackupHookLocal.doFullBackup(dir, cb)
             }
 
             handler.post {

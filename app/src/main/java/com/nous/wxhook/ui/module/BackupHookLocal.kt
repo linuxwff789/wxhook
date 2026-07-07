@@ -5,6 +5,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -12,12 +13,13 @@ import java.util.zip.GZIPOutputStream
 
 /**
  * Local backup for Manager App.
- * Uses su -c cp to access WeChat files (verified working).
+ * Uses /proc/PID/root/ to read WeChat files (no su needed).
  */
 object BackupHookLocal {
 
     private const val RECORDS_FILE = "backup_records.json"
     private const val STATE_FILE = "backup_state.json"
+    private const val WX_HASH = "6d1f34a5edc49e8b6d238141b2d004f3"
 
     interface ProgressCallback {
         fun onProgress(current: String, fileCount: Long, totalSize: Long)
@@ -29,33 +31,33 @@ object BackupHookLocal {
             val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             var dbSize = 0L; var fileCount = 0L; var totalSize = 0L
 
-            // Get WeChat PID
             val pid = getWxPid() ?: return Result(false, "微信未运行")
 
-            // Backup DB (gzip)
+            // Backup DB
             callback?.onProgress("备份数据库...", fileCount, totalSize)
             val dbSrc = File("/sdcard/Download/EnMicroMsg.db")
             if (dbSrc.exists()) {
-                val dbDst = if (compress) File(dir, "EnMicroMsg_$tag.db.gz") else File(dir, "EnMicroMsg_$tag.db")
-                if (compress) compressFile(dbSrc, dbDst) else copyFile(dbSrc, dbDst)
+                val ext = if (compress) ".db.gz" else ".db"
+                val dbDst = File(dir, "EnMicroMsg_$tag$ext")
+                if (compress) compressFile(dbSrc, dbDst) else copyFileJava(dbSrc, dbDst)
                 dbSize = dbDst.length(); fileCount++; totalSize += dbSize
             }
 
-            // Backup attachments via su
-            val wxBase = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
+            // Backup attachments via /proc/PID/root/
+            val wxBase = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/$WX_HASH"
             val attDirs = listOf("image2", "voice2", "video", "cdn")
 
             for (attDir in attDirs) {
                 callback?.onProgress("备份 $attDir...", fileCount, totalSize)
                 val dst = File(dir, attDir)
                 if (!dst.exists()) dst.mkdirs()
-                val count = copyDirSu(wxBase, attDir, dst)
+                val count = copyDirJava(wxBase, attDir, dst)
                 fileCount += count.first; totalSize += count.second
             }
 
             saveState(tag, fileCount, totalSize)
             addRecord(createRecord(tag, "full", dbSize, fileCount, totalSize, "全量备份完成"))
-            Result(true, "全量备份完成: ${fileCount}个文件")
+            Result(true, "全量备份完成: ${fileCount}个文件, ${formatSize(totalSize)}")
         } catch (e: Exception) { Result(false, "备份失败: ${e.message}") }
     }
 
@@ -76,25 +78,25 @@ object BackupHookLocal {
                 val ext = if (compress) ".db.gz" else ".db"
                 val dbDst = File(dir, "EnMicroMsg_$tag$ext")
                 dir.listFiles()?.filter { it.name.startsWith("EnMicroMsg_") && (it.name.endsWith(".db.gz") || it.name.endsWith(".db")) }?.forEach { it.delete() }
-                if (compress) compressFile(dbSrc, dbDst) else copyFile(dbSrc, dbDst)
+                if (compress) compressFile(dbSrc, dbDst) else copyFileJava(dbSrc, dbDst)
                 dbSize = dbDst.length(); fileCount++; totalSize += dbSize; newFiles++
             }
 
             // Incremental attachments
-            val wxBase = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/6d1f34a5edc49e8b6d238141b2d004f3"
+            val wxBase = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/$WX_HASH"
             val attDirs = listOf("image2", "voice2", "video", "cdn")
 
             for (attDir in attDirs) {
                 callback?.onProgress("增量 $attDir...", fileCount, totalSize)
                 val dst = File(dir, attDir)
                 if (!dst.exists()) dst.mkdirs()
-                val count = copyDirIncrementalSu(wxBase, attDir, dst, lastTime)
+                val count = copyDirIncrementalJava(wxBase, attDir, dst, lastTime)
                 fileCount += count.first; totalSize += count.second; newFiles += count.third
             }
 
             saveState(tag, fileCount, totalSize)
             addRecord(createRecord(tag, "incremental", dbSize, fileCount, totalSize, if (newFiles > 0) "增量: ${newFiles}个新文件" else "无新文件"))
-            val msg = if (newFiles > 0) "增量备份: ${newFiles}个新文件" else "无新文件"
+            val msg = if (newFiles > 0) "增量备份: ${newFiles}个新文件, ${formatSize(totalSize)}" else "无新文件"
             Result(true, msg)
         } catch (e: Exception) { Result(false, "增量备份失败: ${e.message}") }
     }
@@ -102,16 +104,38 @@ object BackupHookLocal {
     // ── Helpers ──
 
     private fun getWxPid(): String? {
-        return try {
+        // Try /proc approach first
+        try {
+            val procDir = File("/proc")
+            procDir.listFiles()?.forEach { dir ->
+                if (dir.name.toIntOrNull() != null) {
+                    val cmdline = File(dir, "cmdline")
+                    if (cmdline.exists()) {
+                        val content = cmdline.readText()
+                        if (content.contains("com.tencent.mm")) return dir.name
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // Fallback: try su
+        try {
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
             val pid = proc.inputStream.bufferedReader().readText().trim()
             proc.waitFor()
-            if (pid.isEmpty()) null else pid
-        } catch (e: Exception) { null }
+            if (pid.isNotEmpty()) return pid
+        } catch (_: Exception) {}
+
+        return null
     }
 
-    private fun copyFile(src: File, dst: File) {
-        FileInputStream(src).use { input -> FileOutputStream(dst).use { output -> input.copyTo(output, bufferSize = 65536) } }
+    private fun copyFileJava(src: File, dst: File) {
+        FileInputStream(src).use { input ->
+            FileOutputStream(dst).use { output ->
+                input.copyTo(output, bufferSize = 65536)
+            }
+        }
+        dst.setReadable(true, false)
     }
 
     private fun compressFile(src: File, dst: File) {
@@ -122,63 +146,53 @@ object BackupHookLocal {
         }
     }
 
-    /**
-     * Copy directory via su (recursive)
-     * @return Pair(fileCount, totalSize)
-     */
-    private fun copyDirSu(wxBase: String, attDir: String, dstDir: File): Pair<Long, Long> {
-        val srcPath = "$wxBase/$attDir"
-        // Get file list via su
-        val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "find '$srcPath' -type f 2>/dev/null"))
-        val files = proc.inputStream.bufferedReader().readLines()
-        proc.waitFor()
+    private fun copyDirJava(wxBase: String, attDir: String, dstDir: File): Pair<Long, Long> {
+        val srcDir = File("$wxBase/$attDir")
+        if (!srcDir.exists()) return Pair(0, 0)
 
         var count = 0L; var size = 0L
-        for (filePath in files) {
-            if (filePath.isBlank()) continue
-            val relPath = filePath.removePrefix("$srcPath/")
-            val dstFile = File(dstDir, relPath)
-            dstFile.parentFile?.mkdirs()
-
-            // Copy via su
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "cp '$filePath' '${dstFile.absolutePath}' && chmod 644 '${dstFile.absolutePath}'")).waitFor()
-
-            if (dstFile.exists()) {
-                count++
-                size += dstFile.length()
+        srcDir.listFiles()?.forEach { file ->
+            if (file.isDirectory) {
+                val sub = File(dstDir, file.name); sub.mkdirs()
+                val r = copyDirJava("$wxBase/$attDir/${file.name}", "", sub)
+                count += r.first; size += r.second
+            } else {
+                val dstFile = File(dstDir, file.name)
+                copyFileJava(file, dstFile)
+                count++; size += file.length()
             }
         }
         return Pair(count, size)
     }
 
-    /**
-     * Incremental copy via su
-     * @return Triple(fileCount, totalSize, newFileCount)
-     */
-    private fun copyDirIncrementalSu(wxBase: String, attDir: String, dstDir: File, lastTime: Long): Triple<Long, Long, Int> {
-        val srcPath = "$wxBase/$attDir"
-        val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "find '$srcPath' -type f -newer /proc/1/cmdline 2>/dev/null"))
-        // Simpler: get all files, check modification via ls -l
-        val proc2 = Runtime.getRuntime().exec(arrayOf("su", "-c", "find '$srcPath' -type f 2>/dev/null"))
-        val files = proc2.inputStream.bufferedReader().readLines()
-        proc2.waitFor()
+    private fun copyDirIncrementalJava(wxBase: String, attDir: String, dstDir: File, lastTime: Long): Triple<Long, Long, Int> {
+        val srcDir = File("$wxBase/$attDir")
+        if (!srcDir.exists()) return Triple(0, 0, 0)
 
         var count = 0L; var size = 0L; var newCount = 0
-        for (filePath in files) {
-            if (filePath.isBlank()) continue
-            val relPath = filePath.removePrefix("$srcPath/")
-            val dstFile = File(dstDir, relPath)
-
-            // Check if file needs copying (newer or missing)
-            if (!dstFile.exists() || dstFile.lastModified() < lastTime) {
-                dstFile.parentFile?.mkdirs()
-                Runtime.getRuntime().exec(arrayOf("su", "-c", "cp '$filePath' '${dstFile.absolutePath}' && chmod 644 '${dstFile.absolutePath}'")).waitFor()
-                if (dstFile.exists()) newCount++
+        srcDir.listFiles()?.forEach { file ->
+            if (file.isDirectory) {
+                val sub = File(dstDir, file.name); sub.mkdirs()
+                val r = copyDirIncrementalJava("$wxBase/$attDir/${file.name}", "", sub, lastTime)
+                count += r.first; size += r.second; newCount += r.third
+            } else {
+                val dstFile = File(dstDir, file.name)
+                if (!dstFile.exists() || file.lastModified() > lastTime) {
+                    copyFileJava(file, dstFile)
+                    newCount++
+                }
+                count++; size += file.length()
             }
-            count++
-            if (dstFile.exists()) size += dstFile.length()
         }
         return Triple(count, size, newCount)
+    }
+
+    private fun formatSize(bytes: Long): String {
+        return when {
+            bytes > 1024 * 1024 -> "%.1f MB".format(bytes.toFloat() / 1024 / 1024)
+            bytes > 1024 -> "%.1f KB".format(bytes.toFloat() / 1024)
+            else -> "$bytes B"
+        }
     }
 
     private fun createRecord(tag: String, type: String, dbSize: Long, fileCount: Long, totalSize: Long, message: String): JSONObject {
