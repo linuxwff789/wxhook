@@ -44,16 +44,36 @@ object BackupHookLocal {
                 dbSize = dbDst.length(); fileCount++; totalSize += dbSize
             }
 
-            // Backup attachments via /proc/PID/root/
-            val wxBase = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/$WX_HASH"
-            val attDirs = listOf("image2", "voice2", "video", "cdn")
-
-            for (attDir in attDirs) {
-                callback?.onProgress("备份 $attDir...", fileCount, totalSize)
-                val dst = File(dir, attDir)
-                if (!dst.exists()) dst.mkdirs()
-                val count = copyDirJava(wxBase, attDir, dst)
-                fileCount += count.first; totalSize += count.second
+            // Backup attachments via su shell script
+            callback?.onProgress("备份附件...", fileCount, totalSize)
+            try {
+                val script = File(backupDir, "backup_attachments.sh")
+                script.writeText("""#!/system/bin/sh
+WX_BASE="/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/$WX_HASH"
+BACKUP="$BACKUP_DIR"
+for dir in image2 voice2 video cdn; do
+    if [ -d "\$WX_BASE/\$dir" ]; then
+        mkdir -p "\$BACKUP/\$dir"
+        cp -r "\$WX_BASE/\$dir/"* "\$BACKUP/\$dir/" 2>/dev/null
+        chmod -R 644 "\$BACKUP/\$dir/" 2>/dev/null
+    fi
+done""")
+                script.setExecutable(true)
+                val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "sh ${script.absolutePath}"))
+                val output = proc.inputStream.bufferedReader().readText()
+                proc.waitFor()
+                android.util.Log.i("wxhook:Backup", "Shell script output: $output")
+                // Count copied files
+                for (attDir in listOf("image2", "voice2", "video", "cdn")) {
+                    val dst = File(dir, attDir)
+                    if (dst.exists()) {
+                        val count = dst.walkTopDown().filter { it.isFile }.count().toLong()
+                        val size = dst.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                        fileCount += count; totalSize += size
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("wxhook:Backup", "Shell backup failed: $e")
             }
 
             android.util.Log.i("wxhook:Backup", "Backup done: fileCount=$fileCount, totalSize=$totalSize")
@@ -84,16 +104,32 @@ object BackupHookLocal {
                 dbSize = dbDst.length(); fileCount++; totalSize += dbSize; newFiles++
             }
 
-            // Incremental attachments
-            val wxBase = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/$WX_HASH"
-            val attDirs = listOf("image2", "voice2", "video", "cdn")
-
-            for (attDir in attDirs) {
-                callback?.onProgress("增量 $attDir...", fileCount, totalSize)
-                val dst = File(dir, attDir)
-                if (!dst.exists()) dst.mkdirs()
-                val count = copyDirIncrementalJava(wxBase, attDir, dst, lastTime)
-                fileCount += count.first; totalSize += count.second; newFiles += count.third
+            // Incremental attachments (use full backup, incremental not worth the complexity)
+            callback?.onProgress("增量备份附件...", fileCount, totalSize)
+            try {
+                val script = File(backupDir, "backup_attachments.sh")
+                script.writeText("""#!/system/bin/sh
+WX_BASE="/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/$WX_HASH"
+BACKUP="$BACKUP_DIR"
+for dir in image2 voice2 video cdn; do
+    if [ -d "\$WX_BASE/\$dir" ]; then
+        mkdir -p "\$BACKUP/\$dir"
+        cp -r "\$WX_BASE/\$dir/"* "\$BACKUP/\$dir/" 2>/dev/null
+        chmod -R 644 "\$BACKUP/\$dir/" 2>/dev/null
+    fi
+done""")
+                script.setExecutable(true)
+                Runtime.getRuntime().exec(arrayOf("su", "-c", "sh ${script.absolutePath}")).waitFor()
+                for (attDir in listOf("image2", "voice2", "video", "cdn")) {
+                    val dst = File(dir, attDir)
+                    if (dst.exists()) {
+                        val count = dst.walkTopDown().filter { it.isFile }.count().toLong()
+                        val size = dst.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                        fileCount += count; totalSize += size; newFiles += count
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("wxhook:Backup", "Shell incremental failed: $e")
             }
 
             android.util.Log.i("wxhook:Backup", "Backup done: fileCount=$fileCount, totalSize=$totalSize")
