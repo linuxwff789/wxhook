@@ -176,7 +176,7 @@ class ModuleActivity : AppCompatActivity() {
         val records = BackupManager.getRecords()
         if (records.isEmpty()) {
             handler.post { logView.text = "暂无备份记录" }
-            return
+            return@Thread
         }
         val sb = StringBuilder()
         records.take(10).forEach { r ->
