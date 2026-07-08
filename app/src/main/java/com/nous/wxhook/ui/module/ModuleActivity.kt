@@ -129,7 +129,7 @@ class ModuleActivity : AppCompatActivity() {
         root.addView(recordsCard)
 
         // Load records
-        // refreshRecords()
+        Thread { try { val records = BackupManager.getRecords(); val sb = StringBuilder(); records.take(10).forEach { r -> val time = BackupManager.formatTime(r.time); val size = BackupManager.formatSize(r.totalSize); val type = if (r.type == "full") "全量" else "增量"; sb.appendLine("[$time] $type | $size | ${r.fileCount}文件"); sb.appendLine("  ${r.message}") }; handler.post { logView.text = sb.toString() } } catch (e: Exception) { handler.post { logView.text = "记录加载失败" } } }.start()
 
         sv.addView(root)
         setContentView(sv)
@@ -162,7 +162,7 @@ class ModuleActivity : AppCompatActivity() {
                 } else {
                     log("❌ ${result.message}")
                 }
-                // refreshRecords()
+                Thread { try { val records = BackupManager.getRecords(); val sb = StringBuilder(); records.take(10).forEach { r -> val time = BackupManager.formatTime(r.time); val size = BackupManager.formatSize(r.totalSize); val type = if (r.type == "full") "全量" else "增量"; sb.appendLine("[$time] $type | $size | ${r.fileCount}文件"); sb.appendLine("  ${r.message}") }; handler.post { logView.text = sb.toString() } } catch (e: Exception) { handler.post { logView.text = "记录加载失败" } } }.start()
                 isBackingUp = false
                 backupBtn.isEnabled = true; incrBtn.isEnabled = true
                 backupBtn.text = "全量备份 (DB + 附件)"; incrBtn.text = "增量备份 (仅新文件)"
@@ -194,7 +194,29 @@ class ModuleActivity : AppCompatActivity() {
     }
 
     private fun getStatusText(): String {
-        return "  点击检测环境按钮查看状态"
+        try {
+        val sb = StringBuilder()
+        try {
+            val keyFile = File("/data/local/tmp/.wechat_key")
+            if (keyFile.exists()) {
+                val key = keyFile.readText().lines().find { it.startsWith("key=") } ?: "未知"
+                sb.appendLine("  密钥: $key")
+            } else {
+                sb.appendLine("  密钥: 未捕获")
+            }
+        } catch (_: Exception) { sb.appendLine("  密钥: 读取失败") }
+        val dbFile = File("/sdcard/Download/EnMicroMsg.db")
+        if (dbFile.exists()) {
+            sb.appendLine("  数据库: ${BackupManager.formatSize(dbFile.length())}")
+        } else {
+            sb.appendLine("  数据库: 未复制")
+        }
+        val info = BackupManager.getBackupInfo()
+        sb.appendLine("  备份目录: ${info.optString("backupDir", "无")}")
+        sb.appendLine("  备份文件: ${info.optInt("fileCount", 0)}个")
+        sb.appendLine("  最后备份: ${BackupManager.formatTime(info.optLong("lastBackupTime", 0))}")
+        return sb.toString()
+        } catch (e: Exception) { return "状态加载失败: ${e.message}" }
     }
 
     private fun checkEnvironment(statusText: TextView) {
