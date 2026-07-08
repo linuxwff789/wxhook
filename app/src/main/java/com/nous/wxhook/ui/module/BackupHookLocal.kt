@@ -29,7 +29,7 @@ object BackupHookLocal {
         android.util.Log.i("wxhook:Backup", "doFullBackup called: dir=$backupDir, compress=$compress")
         return try {
             val dir = File(backupDir); if (!dir.exists()) dir.mkdirs()
-            val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val tag = "latest"
             var dbSize = 0L; var fileCount = 0L; var totalSize = 0L
 
             val pid = getWxPid() ?: return Result(false, "微信未运行")
@@ -79,7 +79,7 @@ object BackupHookLocal {
             val dir = File(backupDir); if (!dir.exists()) dir.mkdirs()
             val state = loadState(backupDir)
             val lastTime = state.optLong("lastBackupTime", 0L)
-            val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val tag = "latest"
             var dbSize = 0L; var fileCount = 0L; var totalSize = 0L; var newFiles = 0L
 
             val pid = getWxPid() ?: return Result(false, "微信未运行")
