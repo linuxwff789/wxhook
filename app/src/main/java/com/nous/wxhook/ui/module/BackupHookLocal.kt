@@ -119,26 +119,6 @@ object BackupHookLocal {
                     android.util.Log.e("wxhook:Backup", "Incremental $attDir failed: $e")
                 }
             }
-            val wxBasePath = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/$WX_HASH"
-            val backupBasePath = dir.absolutePath
-            for (attDir in listOf("image2", "voice2", "video", "cdn")) {
-                val src = "\$wxBasePath/\$attDir"
-                val dst = "\$backupBasePath/\$attDir"
-                try {
-                    Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p \$dst")).waitFor()
-                    val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cp -r \$src/* \$dst/ 2>/dev/null && chmod -R 644 \$dst/ 2>/dev/null"))
-                    proc.waitFor()
-                    val dstDir = File(dst)
-                    if (dstDir.exists()) {
-                        val count = dstDir.walkTopDown().filter { it.isFile }.count().toLong()
-                        val size = dstDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-                        fileCount += count; totalSize += size; newFiles += count
-                    }
-                    android.util.Log.i("wxhook:Backup", "Copied \$attDir")
-                } catch (e: Exception) {
-                    android.util.Log.e("wxhook:Backup", "Copy \$attDir failed: \$e")
-                }
-            }
 
             android.util.Log.i("wxhook:Backup", "Backup done: fileCount=$fileCount, totalSize=$totalSize")
             saveState(tag, fileCount, totalSize)
