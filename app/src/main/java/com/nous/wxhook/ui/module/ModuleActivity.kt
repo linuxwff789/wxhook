@@ -171,6 +171,7 @@ class ModuleActivity : AppCompatActivity() {
     }
 
     private fun refreshRecords() {
+        Thread {
         try {
         val records = BackupManager.getRecords()
         if (records.isEmpty()) {
@@ -185,10 +186,11 @@ class ModuleActivity : AppCompatActivity() {
             sb.appendLine("[$time] $type | $size | ${r.fileCount}文件")
             sb.appendLine("  ${r.message}")
         }
-        logView.text = sb.toString()
+        handler.post { logView.text = sb.toString() }
         } catch (e: Exception) {
-            logView.text = "记录加载失败: ${e.message}"
+            handler.post { logView.text = "记录加载失败: ${e.message}" }
         }
+        }.start()
     }
 
     private fun getStatusText(): String {
