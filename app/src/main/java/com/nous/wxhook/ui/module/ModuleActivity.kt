@@ -175,7 +175,7 @@ class ModuleActivity : AppCompatActivity() {
         try {
         val records = BackupManager.getRecords()
         if (records.isEmpty()) {
-            logView.text = "暂无备份记录"
+            handler.post { logView.text = "暂无备份记录" }
             return
         }
         val sb = StringBuilder()
