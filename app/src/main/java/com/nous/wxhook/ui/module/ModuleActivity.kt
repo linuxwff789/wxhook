@@ -129,7 +129,7 @@ class ModuleActivity : AppCompatActivity() {
         root.addView(recordsCard)
 
         // Load records
-        handler.post { refreshRecords() }
+        // refreshRecords()
 
         sv.addView(root)
         setContentView(sv)
@@ -162,7 +162,7 @@ class ModuleActivity : AppCompatActivity() {
                 } else {
                     log("❌ ${result.message}")
                 }
-                handler.post { refreshRecords() }
+                // refreshRecords()
                 isBackingUp = false
                 backupBtn.isEnabled = true; incrBtn.isEnabled = true
                 backupBtn.text = "全量备份 (DB + 附件)"; incrBtn.text = "增量备份 (仅新文件)"
