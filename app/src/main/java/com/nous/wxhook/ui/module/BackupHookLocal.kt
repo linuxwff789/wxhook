@@ -95,8 +95,30 @@ object BackupHookLocal {
                 dbSize = dbDst.length(); fileCount++; totalSize += dbSize; newFiles++
             }
 
-            // Incremental attachments via su -c cp
-            callback?.onProgress("增量备份附件...", fileCount, totalSize)
+            // Incremental attachments: find files newer than lastTime
+            val wxBasePath = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/$WX_HASH"
+            val backupBasePath = dir.absolutePath
+            for (attDir in listOf("image2", "voice2", "video", "cdn")) {
+                val src = "$wxBasePath/$attDir"
+                val dst = "$backupBasePath/$attDir"
+                try {
+                    val lastTimeSec = lastTime / 1000
+                    val findProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "find $src -type f -newermt @$lastTimeSec 2>/dev/null"))
+                    val newFilesList = findProc.inputStream.bufferedReader().readLines().filter { it.isNotBlank() }
+                    findProc.waitFor()
+                    callback?.onProgress("增量 $attDir: ${newFilesList.size}个新文件", fileCount, totalSize)
+                    for (filePath in newFilesList) {
+                        val relPath = filePath.removePrefix("$src/")
+                        val dstFile = File(dst, relPath)
+                        dstFile.parentFile?.mkdirs()
+                        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp "$filePath" "${dstFile.absolutePath}" && chmod 644 "${dstFile.absolutePath}"")).waitFor()
+                        if (dstFile.exists()) { fileCount++; totalSize += dstFile.length(); newFiles++ }
+                    }
+                    android.util.Log.i("wxhook:Backup", "Incremental $attDir: ${newFilesList.size} new files")
+                } catch (e: Exception) {
+                    android.util.Log.e("wxhook:Backup", "Incremental $attDir failed: $e")
+                }
+            }
             val wxBasePath = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/$WX_HASH"
             val backupBasePath = dir.absolutePath
             for (attDir in listOf("image2", "voice2", "video", "cdn")) {
