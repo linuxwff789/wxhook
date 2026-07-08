@@ -194,35 +194,7 @@ class ModuleActivity : AppCompatActivity() {
     }
 
     private fun getStatusText(): String {
-        try {
-        val sb = StringBuilder()
-        // Key
-        try {
-            val keyFile = File("/data/local/tmp/.wechat_key")
-            if (keyFile.exists()) {
-                val key = keyFile.readText().lines().find { it.startsWith("key=") } ?: "未知"
-                sb.appendLine("  密钥: $key")
-            } else {
-                sb.appendLine("  密钥: 未捕获")
-            }
-        } catch (_: Exception) { sb.appendLine("  密钥: 读取失败") }
-
-        // DB
-        val dbFile = File("/sdcard/Download/EnMicroMsg.db")
-        if (dbFile.exists()) {
-            sb.appendLine("  数据库: ${BackupManager.formatSize(dbFile.length())}")
-        } else {
-            sb.appendLine("  数据库: 未复制")
-        }
-
-        // Backup info
-        val info = BackupManager.getBackupInfo()
-        sb.appendLine("  备份目录: ${info.optString("backupDir", "无")}")
-        sb.appendLine("  备份文件: ${info.optInt("fileCount", 0)}个")
-        sb.appendLine("  最后备份: ${BackupManager.formatTime(info.optLong("lastBackupTime", 0))}")
-
-        return sb.toString()
-        } catch (e: Exception) { return "状态加载失败: ${e.message}" }
+        return "  点击检测环境按钮查看状态"
     }
 
     private fun checkEnvironment(statusText: TextView) {
