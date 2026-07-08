@@ -111,7 +111,7 @@ object BackupHookLocal {
                         val relPath = filePath.removePrefix("$src/")
                         val dstFile = File(dst, relPath)
                         dstFile.parentFile?.mkdirs()
-                        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp "$filePath" "${dstFile.absolutePath}" && chmod 644 "${dstFile.absolutePath}"")).waitFor()
+                        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"$filePath\" \"${dstFile.absolutePath}\" && chmod 644 \"${dstFile.absolutePath}\"")).waitFor()
                         if (dstFile.exists()) { fileCount++; totalSize += dstFile.length(); newFiles++ }
                     }
                     android.util.Log.i("wxhook:Backup", "Incremental $attDir: ${newFilesList.size} new files")
