@@ -54,7 +54,7 @@ class ModuleActivity : AppCompatActivity() {
         root.addView(makeCardTitle("📊 状态"))
         val statusCard = makeCard()
         val statusText = TextView(this).apply { textSize = 13f; setPadding(dp(12), dp(8), dp(12), dp(8)); typeface = Typeface.MONOSPACE }
-        statusText.text = getStatusText()
+        Thread { val s = getStatusText(); handler.post { statusText.text = s } }.start()
 
         // 检测按钮
         val checkBtn = Button(this).apply {
