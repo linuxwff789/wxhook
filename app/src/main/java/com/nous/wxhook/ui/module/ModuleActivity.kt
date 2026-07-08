@@ -171,6 +171,7 @@ class ModuleActivity : AppCompatActivity() {
     }
 
     private fun refreshRecords() {
+        try {
         val records = BackupManager.getRecords()
         if (records.isEmpty()) {
             logView.text = "暂无备份记录"
@@ -185,9 +186,13 @@ class ModuleActivity : AppCompatActivity() {
             sb.appendLine("  ${r.message}")
         }
         logView.text = sb.toString()
+        } catch (e: Exception) {
+            logView.text = "记录加载失败: ${e.message}"
+        }
     }
 
     private fun getStatusText(): String {
+        try {
         val sb = StringBuilder()
         // Key
         try {
@@ -215,6 +220,7 @@ class ModuleActivity : AppCompatActivity() {
         sb.appendLine("  最后备份: ${BackupManager.formatTime(info.optLong("lastBackupTime", 0))}")
 
         return sb.toString()
+        } catch (e: Exception) { return "状态加载失败: ${e.message}" }
     }
 
     private fun checkEnvironment(statusText: TextView) {
