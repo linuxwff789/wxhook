@@ -19,6 +19,14 @@ object BackupHookLocal {
 
     private const val RECORDS_FILE = "backup_records.json"
     private const val STATE_FILE = "backup_state.json"
+    private const val DB_CONFIG_FILE = "db_config.json"
+    // SQLCipher encryption params
+    private const val DB_PASSWORD = "e9cd2ae"
+    private const val DB_COMPAT = "3"
+    private const val DB_PAGE_SIZE = "1024"
+    private const val DB_KDF_ITER = "4000"
+    private const val DB_HMAC = "OFF"
+    private const val STATE_FILE = "backup_state.json"
     private const val WX_HASH = "" // dynamic
 
     interface ProgressCallback {
@@ -71,6 +79,7 @@ object BackupHookLocal {
 
             android.util.Log.i("wxhook:Backup", "Backup done: fileCount=$fileCount, totalSize=$totalSize")
             saveState(tag, fileCount, totalSize)
+            saveDbConfig(dir.absolutePath)
             addRecord(createRecord(tag, "full", dbSize, fileCount, totalSize, "全量备份完成"))
             Result(true, "全量备份完成: ${fileCount}个文件, ${formatSize(totalSize)}")
         } catch (e: Exception) { Result(false, "备份失败: ${e.message}") }
@@ -281,3 +290,105 @@ object BackupHookLocal {
 
     data class Result(val success: Boolean, val message: String)
 }
+
+    /**
+     * Save DB encryption config
+     */
+    private fun saveDbConfig(backupDir: String) {
+        val config = JSONObject()
+        config.put("password", DB_PASSWORD)
+        config.put("compat", DB_COMPAT)
+        config.put("pageSize", DB_PAGE_SIZE)
+        config.put("kdfIter", DB_KDF_ITER)
+        config.put("hmac", DB_HMAC)
+        config.put("savedAt", System.currentTimeMillis())
+        File(backupDir, DB_CONFIG_FILE).writeText(config.toString())
+    }
+
+    /**
+     * Decrypt DB and extract new records since last backup
+     */
+    private fun incrementalDbBackup(backupDir: String, callback: ProgressCallback?): Pair<Long, Long> {
+        val state = loadState(backupDir)
+        val lastBackupTime = state.optLong("lastBackupTime", 0L)
+        val dbSrc = File("/sdcard/Download/EnMicroMsg.db")
+        if (!dbSrc.exists()) return Pair(0, 0)
+
+        // Decrypt to temp file
+        val tmpDb = File(backupDir, "tmp_decrypted.db")
+        try {
+            callback?.onProgress("解密数据库...", 0, 0)
+            // Use sqlcipher to decrypt
+            val sqlcipherPath = "/data/local/sqlcipher"
+            val sql = """
+                PRAGMA cipher_compatibility = $DB_COMPAT;
+                PRAGMA cipher_page_size = $DB_PAGE_SIZE;
+                PRAGMA kdf_iter = $DB_KDF_ITER;
+                PRAGMA cipher_use_hmac = $DB_HMAC;
+                ATTACH DATABASE '${tmpDb.absolutePath}' AS plaintext KEY '$DB_PASSWORD';
+                SELECT sqlcipher_export('plaintext');
+                DETACH DATABASE plaintext;
+            """.trimIndent()
+            val proc = Runtime.getRuntime().exec(arrayOf(
+                "su", "-c",
+                "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
+                "$sqlcipherPath '${dbSrc.absolutePath}' < /dev/stdin"
+            ))
+            proc.outputStream.bufferedWriter().use { it.write(sql) }
+            proc.waitFor()
+
+            if (!tmpDb.exists()) {
+                android.util.Log.e("wxhook:Backup", "Decrypt failed")
+                return Pair(0, 0)
+            }
+
+            callback?.onProgress("对比新增记录...", 0, 0)
+
+            // Extract new messages using SQL
+            val incrementalDir = File(backupDir, "incremental")
+            if (!incrementalDir.exists()) incrementalDir.mkdirs()
+
+            val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            var totalNew = 0L
+
+            // Query new messages
+            val messagesSql = if (lastBackupTime > 0) {
+                "SELECT * FROM message WHERE createTime > ${lastBackupTime / 1000}"
+            } else {
+                "SELECT * FROM message LIMIT 1000"
+            }
+
+            // Use sqlcipher to dump new records
+            val dumpSql = """
+                PRAGMA cipher_compatibility = $DB_COMPAT;
+                PRAGMA cipher_page_size = $DB_PAGE_SIZE;
+                PRAGMA kdf_iter = $DB_KDF_ITER;
+                PRAGMA cipher_use_hmac = $DB_HMAC;
+                .mode insert message
+                $messagesSql
+            """.trimIndent()
+
+            val dumpFile = File(incrementalDir, "messages_$tag.sql")
+            val dumpProc = Runtime.getRuntime().exec(arrayOf(
+                "su", "-c",
+                "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
+                "$sqlcipherPath '${dbSrc.absolutePath}' < /dev/stdin > ${dumpFile.absolutePath}"
+            ))
+            dumpProc.outputStream.bufferedWriter().use { it.write(dumpSql) }
+            dumpProc.waitFor()
+
+            if (dumpFile.exists()) {
+                totalNew = dumpFile.length()
+                callback?.onProgress("增量记录: ${dumpFile.length()} bytes", 0, dumpFile.length())
+            }
+
+            // Cleanup temp
+            tmpDb.delete()
+
+            return Pair(1, totalNew)
+        } catch (e: Exception) {
+            android.util.Log.e("wxhook:Backup", "Incremental DB backup failed: $e")
+            tmpDb.delete()
+            return Pair(0, 0)
+        }
+    }
