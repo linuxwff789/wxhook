@@ -97,8 +97,8 @@ class ModuleActivity : AppCompatActivity() {
         val remoteRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(12), dp(8), dp(12), dp(8)); gravity = Gravity.CENTER_VERTICAL }
         remoteRow.addView(TextView(this).apply { text = "启用云同步"; textSize = 14f; layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) })
         val remoteSwitch = Switch(this).apply {
-            isChecked = getSharedPreferences("wxhook", MODE_PRIVATE).getBoolean("remote_enabled", false)
-            setOnCheckedChangeListener { _, checked -> getSharedPreferences("wxhook", MODE_PRIVATE).edit().putBoolean("remote_enabled", checked).apply() }
+            isChecked = runCatching { JSONObject(java.io.File("/sdcard/Download/wxhook_backup/remote_config.json").readText()).optBoolean("enabled", false) }.getOrDefault(false)
+            setOnCheckedChangeListener { _, checked -> runCatching { val f = java.io.File("/sdcard/Download/wxhook_backup/remote_config.json"); val o = if (f.exists()) JSONObject(f.readText()) else JSONObject(); o.put("enabled", checked); f.writeText(o.toString()) } }
         }
         remoteRow.addView(remoteSwitch)
         remoteCard.addView(remoteRow)
@@ -107,7 +107,7 @@ class ModuleActivity : AppCompatActivity() {
         val remotePathRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(12), dp(4), dp(12), dp(8)); gravity = Gravity.CENTER_VERTICAL }
         remotePathRow.addView(TextView(this).apply { text = "远程路径: "; textSize = 13f })
         val remotePathInput = EditText(this).apply {
-            setText(getSharedPreferences("wxhook", MODE_PRIVATE).getString("remote_path", "gdrive:wxhook-backup"))
+            setText(runCatching { JSONObject(java.io.File("/sdcard/Download/wxhook_backup/remote_config.json").readText()).optString("remote", "gdrive:wxhook-backup") }.getOrDefault("gdrive:wxhook-backup"))
             textSize = 13f; setPadding(dp(8), dp(4), dp(8), dp(4))
             setBackgroundColor(Color.TRANSPARENT)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -116,7 +116,7 @@ class ModuleActivity : AppCompatActivity() {
         val saveRemoteBtn = Button(this).apply {
             text = "保存"; textSize = 12f
             setOnClickListener {
-                getSharedPreferences("wxhook", MODE_PRIVATE).edit().putString("remote_path", remotePathInput.text.toString().trim()).apply()
+                runCatching { val f = java.io.File("/sdcard/Download/wxhook_backup/remote_config.json"); val o = if (f.exists()) JSONObject(f.readText()) else JSONObject(); o.put("remote", remotePathInput.text.toString().trim()); f.writeText(o.toString()) }
                 log("☁️ 远程路径已保存: ${remotePathInput.text}")
             }
         }
@@ -365,7 +365,7 @@ class ModuleActivity : AppCompatActivity() {
 
     private fun doSync() {
         Thread {
-            val remote = getSharedPreferences("wxhook", MODE_PRIVATE).getString("remote_path", "gdrive:wxhook-backup") ?: "gdrive:wxhook-backup"
+            val remote = runCatching { JSONObject(java.io.File("/sdcard/Download/wxhook_backup/remote_config.json").readText()).optString("remote", "gdrive:wxhook-backup") }.getOrDefault("gdrive:wxhook-backup") ?: "gdrive:wxhook-backup"
             try {
                 log("☁️ 同步到 $remote...")
                 val proc = Runtime.getRuntime().exec(arrayOf("rclone", "sync", "/sdcard/Download/wxhook_backup", remote, "--update"))
