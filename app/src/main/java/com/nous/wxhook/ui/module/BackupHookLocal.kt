@@ -69,7 +69,7 @@ object BackupHookLocal {
                     val dst = "${userDir.absolutePath}/$attDir"
                     try {
                         Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $dst")).waitFor()
-                        val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cp -r "${src}"/* "${dst}/" 2>/dev/null && chmod -R 644 $dst/ 2>/dev/null"))
+                        val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cp -r "${src}"/"*" "${dst}/" 2>/dev/null && chmod -R 644 $dst/ 2>/dev/null"))
                         proc.waitFor()
                         val d = File(dst)
                         if (d.exists()) {
