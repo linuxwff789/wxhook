@@ -375,4 +375,3 @@ object BackupHookLocal {
             return Pair(0, 0)
         }
     }
-        File(com.nous.wxhook.db.BackupManager.BACKUP_DIR, STATE_FILE).writeText(state.toString())
