@@ -323,6 +323,8 @@ object BackupHookLocal {
         File(BACKUP_DIR, DB_CONFIG_FILE).writeText(config.toString())
     }
 
+    }
+
     data class Result(val success: Boolean, val message: String)
 }
-}
+
