@@ -19,6 +19,7 @@ object BackupHookLocal {
     private const val STATE_FILE = "backup_state.json"
     private const val DB_CONFIG_FILE = "db_config.json"
     private const val DB_STATE_FILE = "db_state.json"
+    private const val RCLONE_REMOTE = "gdrive:wxhook-backup"
     private const val BACKUP_DIR = "/sdcard/Download/wxhook_backup"
 
     interface ProgressCallback {
@@ -84,6 +85,7 @@ object BackupHookLocal {
 
             // 4. Git commit
             gitAddAndCommit(tag)
+            rcloneSync(callback)
 
             // 5. Save config and records
             saveDbConfig()
@@ -156,6 +158,7 @@ object BackupHookLocal {
 
             // 3. Git commit
             gitAddAndCommit(tag)
+            rcloneSync(callback)
 
             saveState(tag, totalFiles, totalSize)
             addRecord(createRecord(tag, "incremental", totalFiles, totalSize, if (newFiles > 0) "增量: ${newFiles}个新文件" else "无新文件"))
