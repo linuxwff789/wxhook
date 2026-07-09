@@ -194,44 +194,50 @@ object BackupHookLocal {
     // ── DB incremental backup ──
 
     private fun decryptAndDump(dbPath: String): String {
-        // Write sqlcipher commands to temp file, execute via su -c
         return try {
-            val sqlFile = File(android.os.Environment.getExternalStorageDirectory(), ".wxhook_decrypt.sql")
-            sqlFile.writeText("PRAGMA key = 'e9cd2ae';\n" +
-                "PRAGMA cipher_compatibility = 3;\n" +
-                "PRAGMA cipher_page_size = 1024;\n" +
-                "PRAGMA kdf_iter = 4000;\n" +
-                "PRAGMA cipher_use_hmac = OFF;\n" +
-                ".mode insert\n" +
-                "SELECT * FROM message;\n" +
-                ".output /dev/null\n")
-            val outFile = File(android.os.Environment.getExternalStorageDirectory(), ".wxhook_decrypt_out.sql")
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
+            val tmpDir = "/data/local/tmp"
+            val sqlFile = "$tmpDir/wxhook_dec.sql"
+            val outFile = "$tmpDir/wxhook_dec_out.sql"
+            // Write SQL init file via su echo
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "echo \"PRAGMA key = 'e9cd2ae';\" > $sqlFile && " +
+                "echo \"PRAGMA cipher_compatibility = 3;\" >> $sqlFile && " +
+                "echo \"PRAGMA cipher_page_size = 1024;\" >> $sqlFile && " +
+                "echo \"PRAGMA kdf_iter = 4000;\" >> $sqlFile && " +
+                "echo \"PRAGMA cipher_use_hmac = OFF;\" >> $sqlFile && " +
+                "echo \".mode insert\" >> $sqlFile && " +
+                "echo \"SELECT * FROM message;\" >> $sqlFile")).waitFor()
+            // Execute sqlcipher with init
+            Runtime.getRuntime().exec(arrayOf("su", "-c",
                 "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
-                "/data/local/sqlcipher -init ${sqlFile.absolutePath} '$dbPath' > ${outFile.absolutePath} 2>/dev/null"))
-            proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
-            val output = if (outFile.exists()) outFile.readText() else ""
-            sqlFile.delete(); outFile.delete()
+                "/data/local/sqlcipher -init $sqlFile '$dbPath' 2>/dev/null > $outFile")).waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
+            // Read output
+            val readProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $outFile 2>/dev/null"))
+            val output = readProc.inputStream.bufferedReader().readText()
+            readProc.waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f $sqlFile $outFile")).waitFor()
             output
         } catch (_: Exception) { "" }
     }
 
     private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
         return try {
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
+            val tmpDir = "/data/local/tmp"
+            val sqlFile = "$tmpDir/wxhook_inc.sql"
+            val outFile = "$tmpDir/wxhook_inc_out.sql"
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "echo \"PRAGMA key = 'e9cd2ae';\" > $sqlFile && " +
+                "echo \"PRAGMA cipher_compatibility = 3;\" >> $sqlFile && " +
+                "echo \"PRAGMA cipher_page_size = 1024;\" >> $sqlFile && " +
+                "echo \"PRAGMA kdf_iter = 4000;\" >> $sqlFile && " +
+                "echo \"PRAGMA cipher_use_hmac = OFF;\" >> $sqlFile && " +
+                "echo \".mode insert\" >> $sqlFile && " +
+                "echo \"SELECT * FROM message WHERE rowid > $lastRowId;\" >> $sqlFile")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c",
                 "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
-                "/data/local/sqlcipher '$dbPath' << 'SQL'\n" +
-                "PRAGMA key = 'e9cd2ae';\n" +
-                "PRAGMA cipher_compatibility = 3;\n" +
-                "PRAGMA cipher_page_size = 1024;\n" +
-                "PRAGMA kdf_iter = 4000;\n" +
-                "PRAGMA cipher_use_hmac = OFF;\n" +
-                ".mode insert\n" +
-                "SELECT * FROM message WHERE rowid > $lastRowId;\n" +
-                "SQL"
-            ))
-            val output = proc.inputStream.bufferedReader().readText()
-            proc.waitFor()
+                "/data/local/sqlcipher -init $sqlFile '$dbPath' 2>/dev/null > $outFile")).waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
+            val readProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $outFile 2>/dev/null"))
+            val output = readProc.inputStream.bufferedReader().readText()
+            readProc.waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f $sqlFile $outFile")).waitFor()
             output
         } catch (_: Exception) { "" }
     }
