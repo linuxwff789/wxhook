@@ -195,24 +195,24 @@ object BackupHookLocal {
     // ── DB incremental backup ──
 
     private fun decryptAndDump(dbPath: String): String {
-        // Decrypt DB and dump full SQL
-        // Uses sqlcipher CLI with LD_PRELOAD
+        // Write sqlcipher commands to temp file, execute via su -c
         return try {
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
-                "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
-                "/data/local/sqlcipher '$dbPath' << 'SQL'\n" +
-                "PRAGMA key = 'e9cd2ae';\n" +
+            val sqlFile = File(android.os.Environment.getExternalStorageDirectory(), ".wxhook_decrypt.sql")
+            sqlFile.writeText("PRAGMA key = 'e9cd2ae';\n" +
                 "PRAGMA cipher_compatibility = 3;\n" +
                 "PRAGMA cipher_page_size = 1024;\n" +
                 "PRAGMA kdf_iter = 4000;\n" +
                 "PRAGMA cipher_use_hmac = OFF;\n" +
                 ".mode insert\n" +
                 "SELECT * FROM message;\n" +
-                "SELECT * FROM rconversation;\n" +
-                "SQL"
-            ))
-            val output = proc.inputStream.bufferedReader().readText()
-            proc.waitFor()
+                ".output /dev/null\n")
+            val outFile = File(android.os.Environment.getExternalStorageDirectory(), ".wxhook_decrypt_out.sql")
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
+                "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
+                "/data/local/sqlcipher -init ${sqlFile.absolutePath} '$dbPath' > ${outFile.absolutePath} 2>/dev/null"))
+            proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+            val output = if (outFile.exists()) outFile.readText() else ""
+            sqlFile.delete(); outFile.delete()
             output
         } catch (_: Exception) { "" }
     }
