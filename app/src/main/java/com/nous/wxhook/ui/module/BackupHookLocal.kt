@@ -48,10 +48,9 @@ object BackupHookLocal {
                 val dbSrc = "$wxBasePath/EnMicroMsg.db"
                 val dbDst = File(userDir, "EnMicroMsg_baseline.sql.gz")
                 // Decrypt and dump full SQL
-                val sqlDump = decryptAndDump(dbSrc)
-                if (sqlDump.isNotEmpty()) {
-                    File(userDir, "EnMicroMsg_baseline.sql.gz").writeBytes(compressGzip(sqlDump.toByteArray()))
-                    totalFiles++; totalSize += dbDst.length()
+                val dbGzFile = File(userDir, "EnMicroMsg_baseline.sql.gz")
+                compressFileSu(dbSrc, dbGzFile.absolutePath)
+                if (dbGzFile.exists()) { totalFiles++; totalSize += dbGzFile.length()
                 }
 
                 // Save DB state
@@ -70,7 +69,7 @@ object BackupHookLocal {
                     val dst = "${userDir.absolutePath}/$attDir"
                     try {
                         Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $dst")).waitFor()
-                        val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cp -r $src $dst/ 2>/dev/null && chmod -R 644 $dst/ 2>/dev/null"))
+                        val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cp -r "$src"/* "$dst/" 2>/dev/null && chmod -R 644 $dst/ 2>/dev/null"))
                         proc.waitFor()
                         val d = File(dst)
                         if (d.exists()) {
