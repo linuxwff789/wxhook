@@ -21,3 +21,4 @@ gradlew.bat
 *.jks
 *.keystore
 keystore.properties
+app/src/main/assets/bin/*
