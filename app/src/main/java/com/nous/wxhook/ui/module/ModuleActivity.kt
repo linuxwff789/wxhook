@@ -150,9 +150,9 @@ class ModuleActivity : AppCompatActivity() {
                 }
             }
             val result = if (incremental) {
-                BackupHookLocal.doIncrementalBackup(dir, cb)
+                BackupHookLocal.doIncrementalBackup(cb)
             } else {
-                BackupHookLocal.doFullBackup(dir, cb)
+                BackupHookLocal.doFullBackup(cb)
             }
 
             handler.post {

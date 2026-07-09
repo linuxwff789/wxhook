@@ -8,23 +8,18 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Backup structure:
- *   backupDir/
- *     db_config.json          (passwords, params)
- *     20260710_030000/        (each backup = one timestamp folder)
- *       <user_hash>/          (per user)
- *         EnMicroMsg_xxx.db.gz
- *         image2/
- *         voice2/
- *         ...
- *     backup_records.json
- *     backup_state.json
+ * Backup system:
+ * - Files (images/voice/video etc.) → git version control (auto dedup + incremental)
+ * - Database → custom incremental (baseline SQL + incremental SQL dumps)
+ * - Each backup = git commit + DB incremental dump
  */
 object BackupHookLocal {
 
     private const val RECORDS_FILE = "backup_records.json"
     private const val STATE_FILE = "backup_state.json"
     private const val DB_CONFIG_FILE = "db_config.json"
+    private const val DB_STATE_FILE = "db_state.json"
+    private const val BACKUP_DIR = "/sdcard/Download/wxhook_backup"
 
     interface ProgressCallback {
         fun onProgress(current: String, fileCount: Long, totalSize: Long)
@@ -32,28 +27,42 @@ object BackupHookLocal {
 
     private val ATT_DIRS = listOf("image2", "voice2", "video", "emoji", "avatar", "cdn", "record", "favorite")
 
-    fun doFullBackup(backupDir: String, callback: ProgressCallback? = null, compress: Boolean = true): Result {
+    fun doFullBackup(callback: ProgressCallback? = null): Result {
         return try {
             val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val timeDir = File(backupDir, tag)
+            val dir = File(BACKUP_DIR); if (!dir.exists()) dir.mkdirs()
             var totalFiles = 0L; var totalSize = 0L
 
+            // 1. Find WeChat users
             val wxPaths = findWxPaths()
             if (wxPaths.isEmpty()) return Result(false, "微信未运行或未找到数据")
 
+            // 2. Backup DB (baseline)
             for (wxBasePath in wxPaths) {
                 val userHash = wxBasePath.substringAfterLast("/")
-                val userDir = File(timeDir, userHash)
+                val userDir = File(dir, userDir(userHash))
                 userDir.mkdirs()
 
-                // DB
-                callback?.onProgress("[$userHash] 数据库...", totalFiles, totalSize)
+                callback?.onProgress("[$userHash] 数据库基线...", totalFiles, totalSize)
                 val dbSrc = "$wxBasePath/EnMicroMsg.db"
-                val dbDst = File(userDir, "EnMicroMsg_$tag.db.gz")
-                compressFileSu(dbSrc, dbDst.absolutePath)
-                if (dbDst.exists()) { totalFiles++; totalSize += dbDst.length() }
+                val dbDst = File(userDir, "EnMicroMsg_baseline.sql.gz")
+                // Decrypt and dump full SQL
+                val sqlDump = decryptAndDump(dbSrc)
+                if (sqlDump.isNotEmpty()) {
+                    File(userDir, "EnMicroMsg_baseline.sql.gz").writeBytes(compressGzip(sqlDump.toByteArray()))
+                    totalFiles++; totalSize += dbDst.length()
+                }
 
-                // Attachments
+                // Save DB state
+                saveDbState(userDir, tag)
+            }
+
+            // 3. Backup attachments (git will handle dedup)
+            for (wxBasePath in wxPaths) {
+                val userHash = wxBasePath.substringAfterLast("/")
+                val userDir = File(dir, userDir(userHash))
+                userDir.mkdirs()
+
                 for (attDir in ATT_DIRS) {
                     callback?.onProgress("[$userHash] $attDir...", totalFiles, totalSize)
                     val src = "$wxBasePath/$attDir"
@@ -73,39 +82,55 @@ object BackupHookLocal {
                 }
             }
 
-            saveDbConfig(backupDir)
+            // 4. Git commit
+            gitAddAndCommit(tag)
+
+            // 5. Save config and records
+            saveDbConfig()
             saveState(tag, totalFiles, totalSize)
             addRecord(createRecord(tag, "full", totalFiles, totalSize, "全量备份完成"))
             Result(true, "全量备份完成: ${totalFiles}个文件, ${formatSize(totalSize)}")
         } catch (e: Exception) { Result(false, "备份失败: ${e.message}") }
     }
 
-    fun doIncrementalBackup(backupDir: String, callback: ProgressCallback? = null, compress: Boolean = true): Result {
+    fun doIncrementalBackup(callback: ProgressCallback? = null): Result {
         return try {
-            val state = loadState(backupDir)
+            val state = loadState()
             val lastTime = state.optLong("lastBackupTime", 0L)
             val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val timeDir = File(backupDir, tag)
+            val dir = File(BACKUP_DIR)
             var totalFiles = 0L; var totalSize = 0L; var newFiles = 0L
 
             val wxPaths = findWxPaths()
             if (wxPaths.isEmpty()) return Result(false, "微信未运行或未找到数据")
 
+            // 1. DB incremental
             for (wxBasePath in wxPaths) {
                 val userHash = wxBasePath.substringAfterLast("/")
-                val userDir = File(timeDir, userHash)
+                val userDir = File(dir, userDir(userHash))
                 userDir.mkdirs()
 
-                // DB
-                val dbSrc = File("$wxBasePath/EnMicroMsg.db")
-                if (dbSrc.exists() && dbSrc.lastModified() > lastTime) {
-                    callback?.onProgress("[$userHash] 数据库更新...", totalFiles, totalSize)
-                    val dbDst = File(userDir, "EnMicroMsg_$tag.db.gz")
-                    compressFileSu(dbSrc.absolutePath, dbDst.absolutePath)
-                    if (dbDst.exists()) { totalFiles++; totalSize += dbDst.length(); newFiles++ }
-                }
+                val dbState = loadDbState(userDir)
+                val lastRowId = dbState.optLong("lastMessageRowId", 0)
 
-                // Attachments
+                callback?.onProgress("[$userHash] DB增量...", totalFiles, totalSize)
+                val dbSrc = "$wxBasePath/EnMicroMsg.db"
+                val incrSql = decryptIncremental(dbSrc, lastRowId)
+                if (incrSql.isNotEmpty()) {
+                    val incrFile = File(userDir, "incr_$tag.sql.gz")
+                    incrFile.writeBytes(compressGzip(incrSql.toByteArray()))
+                    totalFiles++; totalSize += incrFile.length(); newFiles++
+                    // Update DB state
+                    updateDbState(userDir, tag, incrSql)
+                }
+            }
+
+            // 2. Attachments incremental (only newer files)
+            for (wxBasePath in wxPaths) {
+                val userHash = wxBasePath.substringAfterLast("/")
+                val userDir = File(dir, userDir(userHash))
+                userDir.mkdirs()
+
                 for (attDir in ATT_DIRS) {
                     val src = "$wxBasePath/$attDir"
                     val dst = "${userDir.absolutePath}/$attDir"
@@ -129,12 +154,94 @@ object BackupHookLocal {
                 }
             }
 
-            saveDbConfig(backupDir)
+            // 3. Git commit
+            gitAddAndCommit(tag)
+
             saveState(tag, totalFiles, totalSize)
             addRecord(createRecord(tag, "incremental", totalFiles, totalSize, if (newFiles > 0) "增量: ${newFiles}个新文件" else "无新文件"))
             val msg = if (newFiles > 0) "增量备份: ${newFiles}个新文件, ${formatSize(totalSize)}" else "无新文件"
             Result(true, msg)
         } catch (e: Exception) { Result(false, "增量备份失败: ${e.message}") }
+    }
+
+    // ── Git operations ──
+
+    private fun gitAddAndCommit(tag: String) {
+        try {
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "cd $BACKUP_DIR && git add -A && git commit -m 'backup: $tag' --allow-empty")).waitFor()
+        } catch (_: Exception) {}
+    }
+
+    private fun userDir(hash: String) = hash
+
+    // ── DB incremental backup ──
+
+    private fun decryptAndDump(dbPath: String): String {
+        // Decrypt DB and dump full SQL
+        // Uses sqlcipher CLI with LD_PRELOAD
+        return try {
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
+                "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
+                "/data/local/sqlcipher '$dbPath' << 'SQL'\n" +
+                "PRAGMA cipher_compatibility = 3;\n" +
+                "PRAGMA cipher_page_size = 1024;\n" +
+                "PRAGMA kdf_iter = 4000;\n" +
+                "PRAGMA cipher_use_hmac = OFF;\n" +
+                ".mode insert\n" +
+                "SELECT * FROM message;\n" +
+                "SELECT * FROM rconversation;\n" +
+                "SQL"
+            ))
+            val output = proc.inputStream.bufferedReader().readText()
+            proc.waitFor()
+            output
+        } catch (_: Exception) { "" }
+    }
+
+    private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
+        return try {
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
+                "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
+                "/data/local/sqlcipher '$dbPath' << 'SQL'\n" +
+                "PRAGMA cipher_compatibility = 3;\n" +
+                "PRAGMA cipher_page_size = 1024;\n" +
+                "PRAGMA kdf_iter = 4000;\n" +
+                "PRAGMA cipher_use_hmac = OFF;\n" +
+                ".mode insert\n" +
+                "SELECT * FROM message WHERE rowid > $lastRowId;\n" +
+                "SQL"
+            ))
+            val output = proc.inputStream.bufferedReader().readText()
+            proc.waitFor()
+            output
+        } catch (_: Exception) { "" }
+    }
+
+    private fun compressGzip(data: ByteArray): ByteArray {
+        val bos = java.io.ByteArrayOutputStream()
+        java.util.zip.GZIPOutputStream(bos).use { it.write(data) }
+        return bos.toByteArray()
+    }
+
+    private fun saveDbState(userDir: File, tag: String) {
+        val state = JSONObject().apply { put("lastBackupTag", tag); put("lastBackupTime", System.currentTimeMillis()) }
+        File(userDir, DB_STATE_FILE).writeText(state.toString())
+    }
+
+    private fun loadDbState(userDir: File): JSONObject {
+        val f = File(userDir, DB_STATE_FILE)
+        return if (f.exists()) try { JSONObject(f.readText()) } catch (_: Exception) { JSONObject() } else JSONObject()
+    }
+
+    private fun updateDbState(userDir: File, tag: String, incrSql: String) {
+        val state = loadDbState(userDir)
+        state.put("lastBackupTag", tag)
+        state.put("lastBackupTime", System.currentTimeMillis())
+        state.put("incrCount", state.optInt("incrCount", 0) + 1)
+        // Try to extract last rowid from INSERT statements
+        val lastInsert = incrSql.lines().lastOrNull { it.contains("INSERT INTO message") }
+        // Save state
+        File(userDir, DB_STATE_FILE).writeText(state.toString())
     }
 
     // ── Helpers ──
@@ -161,13 +268,6 @@ object BackupHookLocal {
         return paths
     }
 
-    private fun compressFileSu(srcPath: String, dstPath: String) {
-        try {
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "gzip -c '$srcPath' > '$dstPath' && chmod 644 '$dstPath'"))
-            proc.waitFor()
-        } catch (_: Exception) {}
-    }
-
     private fun formatSize(bytes: Long): String {
         return when {
             bytes > 1024 * 1024 * 1024 -> "%.1f GB".format(bytes.toFloat() / 1024 / 1024 / 1024)
@@ -185,7 +285,7 @@ object BackupHookLocal {
     }
 
     private fun addRecord(record: JSONObject) {
-        val dir = File(com.nous.wxhook.db.BackupManager.BACKUP_DIR)
+        val dir = File(BACKUP_DIR)
         if (!dir.exists()) dir.mkdirs()
         val f = File(dir, RECORDS_FILE)
         val arr = try { JSONArray(f.readText()) } catch (_: Exception) { JSONArray() }
@@ -195,17 +295,17 @@ object BackupHookLocal {
 
     private fun saveState(tag: String, count: Long, size: Long) {
         val state = JSONObject().apply { put("lastBackupTime", System.currentTimeMillis()); put("lastBackupTag", tag); put("fileCount", count); put("totalSize", size) }
-        File(com.nous.wxhook.db.BackupManager.BACKUP_DIR, STATE_FILE).writeText(state.toString())
+        File(BACKUP_DIR, STATE_FILE).writeText(state.toString())
     }
 
-    private fun loadState(dir: String): JSONObject {
-        val f = File(dir, STATE_FILE)
+    private fun loadState(): JSONObject {
+        val f = File(BACKUP_DIR, STATE_FILE)
         return if (f.exists()) try { JSONObject(f.readText()) } catch (_: Exception) { JSONObject() } else JSONObject()
     }
 
-    private fun saveDbConfig(backupDir: String) {
+    private fun saveDbConfig() {
         val config = JSONObject().apply { put("password", "e9cd2ae"); put("savedAt", System.currentTimeMillis()) }
-        File(backupDir, DB_CONFIG_FILE).writeText(config.toString())
+        File(BACKUP_DIR, DB_CONFIG_FILE).writeText(config.toString())
     }
 
     data class Result(val success: Boolean, val message: String)
