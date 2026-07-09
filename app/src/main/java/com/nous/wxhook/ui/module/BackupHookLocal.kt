@@ -149,12 +149,19 @@ object BackupHookLocal {
             val pid = proc.inputStream.bufferedReader().readText().trim()
             proc.waitFor()
             if (pid.isNotEmpty()) {
-                val microMsgDir = File("/proc/$pid/root/data/data/com.tencent.mm/MicroMsg")
-                if (microMsgDir.exists()) {
-                    microMsgDir.listFiles()?.forEach { hashDir ->
-                        if (hashDir.isDirectory && File(hashDir, "EnMicroMsg.db").exists()) {
-                            paths.add(hashDir.absolutePath)
-                        }
+                val basePath = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg"
+                // Use su to list directories (App can't read /proc/PID/root/)
+                val lsProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $basePath 2>/dev/null"))
+                val dirs = lsProc.inputStream.bufferedReader().readLines().filter { it.isNotBlank() }
+                lsProc.waitFor()
+                for (dirName in dirs) {
+                    val hashPath = "$basePath/$dirName"
+                    // Check if EnMicroMsg.db exists
+                    val checkProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $hashPath/EnMicroMsg.db 2>/dev/null"))
+                    val checkOutput = checkProc.inputStream.bufferedReader().readText().trim()
+                    checkProc.waitFor()
+                    if (checkOutput.isNotEmpty()) {
+                        paths.add(hashPath)
                     }
                 }
             }
