@@ -175,7 +175,8 @@ object BackupHookLocal {
         } catch (_: Exception) {}
     private fun rcloneSync(callback: ProgressCallback?) {
         try {
-            val prefs = android.preference.PreferenceManager.getDefaultSharedPreferences(android.app.ActivityThread.currentApplication())
+            val prefsFile = File(android.app.ActivityThread.currentApplication()?.applicationInfo?.dataDir + "/shared_prefs/wxhook.xml")
+            val prefs = if (prefsFile.exists()) android.app.ActivityThread.currentApplication()?.getSharedPreferences("wxhook", android.content.Context.MODE_PRIVATE) else null
             val enabled = prefs?.getBoolean("remote_enabled", false) ?: false
             if (!enabled) return
             val remote = prefs?.getString("remote_path", "") ?: ""
