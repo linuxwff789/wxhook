@@ -19,7 +19,7 @@ object BackupHookLocal {
 
     private const val RECORDS_FILE = "backup_records.json"
     private const val STATE_FILE = "backup_state.json"
-    private const val WX_HASH = "6d1f34a5edc49e8b6d238141b2d004f3"
+    private const val WX_HASH = "" // dynamic
 
     interface ProgressCallback {
         fun onProgress(current: String, fileCount: Long, totalSize: Long)
@@ -32,7 +32,8 @@ object BackupHookLocal {
             val tag = "latest"
             var dbSize = 0L; var fileCount = 0L; var totalSize = 0L
 
-            val pid = getWxPid() ?: return Result(false, "微信未运行")
+            val wxPaths = findWxPaths()
+            if (wxPaths.isEmpty()) return Result(false, "微信未运行或未找到数据")
 
             // Backup DB
             callback?.onProgress("备份数据库...", fileCount, totalSize)
@@ -46,9 +47,9 @@ object BackupHookLocal {
 
             // Backup attachments via su shell script
                         callback?.onProgress("备份附件...", fileCount, totalSize)
-            val wxBasePath = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/$WX_HASH"
+            for (wxBasePath in wxPaths) {
             val backupBasePath = dir.absolutePath
-            for (attDir in listOf("image2", "voice2", "video", "cdn")) {
+            for (attDir in listOf("image2", "voice2", "video", "emoji", "avatar", "cdn", "record", "favorite")) {
                 val src = "\$wxBasePath/\$attDir"
                 val dst = "\$backupBasePath/\$attDir"
                 try {
@@ -66,6 +67,7 @@ object BackupHookLocal {
                     android.util.Log.e("wxhook:Backup", "Copy \$attDir failed: \$e")
                 }
             }
+            }
 
             android.util.Log.i("wxhook:Backup", "Backup done: fileCount=$fileCount, totalSize=$totalSize")
             saveState(tag, fileCount, totalSize)
@@ -82,7 +84,8 @@ object BackupHookLocal {
             val tag = "latest"
             var dbSize = 0L; var fileCount = 0L; var totalSize = 0L; var newFiles = 0L
 
-            val pid = getWxPid() ?: return Result(false, "微信未运行")
+            val wxPaths = findWxPaths()
+            if (wxPaths.isEmpty()) return Result(false, "微信未运行或未找到数据")
 
             // Check DB
             callback?.onProgress("检查数据库...", fileCount, totalSize)
@@ -96,9 +99,9 @@ object BackupHookLocal {
             }
 
             // Incremental attachments: find files newer than lastTime
-            val wxBasePath = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg/$WX_HASH"
+            for (wxBasePath in wxPaths) {
             val backupBasePath = dir.absolutePath
-            for (attDir in listOf("image2", "voice2", "video", "cdn")) {
+            for (attDir in listOf("image2", "voice2", "video", "emoji", "avatar", "cdn", "record", "favorite")) {
                 val src = "$wxBasePath/$attDir"
                 val dst = "$backupBasePath/$attDir"
                 try {
@@ -119,6 +122,7 @@ object BackupHookLocal {
                     android.util.Log.e("wxhook:Backup", "Incremental $attDir failed: $e")
                 }
             }
+            }
 
             android.util.Log.i("wxhook:Backup", "Backup done: fileCount=$fileCount, totalSize=$totalSize")
             saveState(tag, fileCount, totalSize)
@@ -129,6 +133,26 @@ object BackupHookLocal {
     }
 
     // ── Helpers ──
+
+    private fun findWxPaths(): List<String> {
+        val paths = mutableListOf<String>()
+        try {
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
+            val pid = proc.inputStream.bufferedReader().readText().trim()
+            proc.waitFor()
+            if (pid.isNotEmpty()) {
+                val microMsgDir = File("/proc/$pid/root/data/data/com.tencent.mm/MicroMsg")
+                if (microMsgDir.exists()) {
+                    microMsgDir.listFiles()?.forEach { hashDir ->
+                        if (hashDir.isDirectory && File(hashDir, "EnMicroMsg.db").exists()) {
+                            paths.add(hashDir.absolutePath)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return paths
+    }
 
     private fun getWxPid(): String? {
         android.util.Log.i("wxhook:Backup", "getWxPid called")
