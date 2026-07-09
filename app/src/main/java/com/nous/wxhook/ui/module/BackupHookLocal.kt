@@ -175,11 +175,15 @@ object BackupHookLocal {
         } catch (_: Exception) {}
     private fun rcloneSync(callback: ProgressCallback?) {
         try {
-            callback?.onProgress("同步到网盘...", 0, 0)
-            val proc = Runtime.getRuntime().exec(arrayOf("rclone", "sync", BACKUP_DIR, RCLONE_REMOTE, "--update"))
+            val prefs = android.preference.PreferenceManager.getDefaultSharedPreferences(android.app.ActivityThread.currentApplication())
+            val enabled = prefs?.getBoolean("remote_enabled", false) ?: false
+            if (!enabled) return
+            val remote = prefs?.getString("remote_path", "") ?: ""
+            if (remote.isBlank()) return
+            callback?.onProgress("同步到 $remote...", 0, 0)
+            val proc = Runtime.getRuntime().exec(arrayOf("rclone", "sync", BACKUP_DIR, remote, "--update"))
             proc.waitFor()
         } catch (_: Exception) {}
-    }
     }
 
     private fun userDir(hash: String) = hash
