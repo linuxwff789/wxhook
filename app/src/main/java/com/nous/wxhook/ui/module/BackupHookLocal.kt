@@ -279,12 +279,12 @@ object BackupHookLocal {
 
     private fun saveState(tag: String, count: Long, size: Long) {
         val state = JSONObject().apply { put("lastBackupTime", System.currentTimeMillis()); put("lastBackupTag", tag); put("fileCount", count); put("totalSize", size) }
+        File(com.nous.wxhook.db.BackupManager.BACKUP_DIR, STATE_FILE).writeText(state.toString())
+    }
     private fun loadState(dir: String): JSONObject {
         val f = File(dir, STATE_FILE)
         return if (f.exists()) try { JSONObject(f.readText()) } catch (e: Exception) { JSONObject() } else JSONObject()
 }
-
-    }
 
     data class Result(val success: Boolean, val message: String)
 }
