@@ -177,11 +177,12 @@ object BackupHookLocal {
 
     private fun rcloneSync(callback: ProgressCallback?) {
         try {
-            val prefsFile = File(android.app.ActivityThread.currentApplication()?.applicationInfo?.dataDir + "/shared_prefs/wxhook.xml")
-            val prefs = if (prefsFile.exists()) android.app.ActivityThread.currentApplication()?.getSharedPreferences("wxhook", android.content.Context.MODE_PRIVATE) else null
-            val enabled = prefs?.getBoolean("remote_enabled", false) ?: false
+            val configFile = File(BACKUP_DIR, "remote_config.json")
+            if (!configFile.exists()) return
+            val config = JSONObject(configFile.readText())
+            val enabled = config.optBoolean("enabled", false)
             if (!enabled) return
-            val remote = prefs?.getString("remote_path", "") ?: ""
+            val remote = config.optString("remote", "")
             if (remote.isBlank()) return
             callback?.onProgress("同步到 $remote...", 0, 0)
             val proc = Runtime.getRuntime().exec(arrayOf("rclone", "sync", BACKUP_DIR, remote, "--update"))
