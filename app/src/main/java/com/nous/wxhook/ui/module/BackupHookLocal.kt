@@ -173,6 +173,13 @@ object BackupHookLocal {
         try {
             Runtime.getRuntime().exec(arrayOf("su", "-c", "cd $BACKUP_DIR && git add -A && git commit -m 'backup: $tag' --allow-empty")).waitFor()
         } catch (_: Exception) {}
+    private fun rcloneSync(callback: ProgressCallback?) {
+        try {
+            callback?.onProgress("同步到网盘...", 0, 0)
+            val proc = Runtime.getRuntime().exec(arrayOf("rclone", "sync", BACKUP_DIR, RCLONE_REMOTE, "--update"))
+            proc.waitFor()
+        } catch (_: Exception) {}
+    }
     }
 
     private fun userDir(hash: String) = hash
