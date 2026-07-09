@@ -1,6 +1,7 @@
 package com.nous.wxhook.ui.module
 
 import android.content.Context
+import org.json.JSONObject
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
