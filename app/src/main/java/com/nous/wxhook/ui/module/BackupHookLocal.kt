@@ -26,7 +26,6 @@ object BackupHookLocal {
     private const val DB_PAGE_SIZE = "1024"
     private const val DB_KDF_ITER = "4000"
     private const val DB_HMAC = "OFF"
-    private const val STATE_FILE = "backup_state.json"
     private const val WX_HASH = "" // dynamic
 
     interface ProgressCallback {
@@ -280,17 +279,13 @@ object BackupHookLocal {
 
     private fun saveState(tag: String, count: Long, size: Long) {
         val state = JSONObject().apply { put("lastBackupTime", System.currentTimeMillis()); put("lastBackupTag", tag); put("fileCount", count); put("totalSize", size) }
-        File(com.nous.wxhook.db.BackupManager.BACKUP_DIR, STATE_FILE).writeText(state.toString())
     }
-
     private fun loadState(dir: String): JSONObject {
         val f = File(dir, STATE_FILE)
         return if (f.exists()) try { JSONObject(f.readText()) } catch (e: Exception) { JSONObject() } else JSONObject()
     }
-
     data class Result(val success: Boolean, val message: String)
 }
-
     /**
      * Save DB encryption config
      */
@@ -304,7 +299,6 @@ object BackupHookLocal {
         config.put("savedAt", System.currentTimeMillis())
         File(backupDir, DB_CONFIG_FILE).writeText(config.toString())
     }
-
     /**
      * Decrypt DB and extract new records since last backup
      */
@@ -313,7 +307,6 @@ object BackupHookLocal {
         val lastBackupTime = state.optLong("lastBackupTime", 0L)
         val dbSrc = File("/sdcard/Download/EnMicroMsg.db")
         if (!dbSrc.exists()) return Pair(0, 0)
-
         // Decrypt to temp file
         val tmpDb = File(backupDir, "tmp_decrypted.db")
         try {
@@ -336,28 +329,22 @@ object BackupHookLocal {
             ))
             proc.outputStream.bufferedWriter().use { it.write(sql) }
             proc.waitFor()
-
             if (!tmpDb.exists()) {
                 android.util.Log.e("wxhook:Backup", "Decrypt failed")
                 return Pair(0, 0)
             }
-
             callback?.onProgress("对比新增记录...", 0, 0)
-
             // Extract new messages using SQL
             val incrementalDir = File(backupDir, "incremental")
             if (!incrementalDir.exists()) incrementalDir.mkdirs()
-
             val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             var totalNew = 0L
-
             // Query new messages
             val messagesSql = if (lastBackupTime > 0) {
                 "SELECT * FROM message WHERE createTime > ${lastBackupTime / 1000}"
             } else {
                 "SELECT * FROM message LIMIT 1000"
             }
-
             // Use sqlcipher to dump new records
             val dumpSql = """
                 PRAGMA cipher_compatibility = $DB_COMPAT;
@@ -367,7 +354,6 @@ object BackupHookLocal {
                 .mode insert message
                 $messagesSql
             """.trimIndent()
-
             val dumpFile = File(incrementalDir, "messages_$tag.sql")
             val dumpProc = Runtime.getRuntime().exec(arrayOf(
                 "su", "-c",
@@ -376,15 +362,12 @@ object BackupHookLocal {
             ))
             dumpProc.outputStream.bufferedWriter().use { it.write(dumpSql) }
             dumpProc.waitFor()
-
             if (dumpFile.exists()) {
                 totalNew = dumpFile.length()
                 callback?.onProgress("增量记录: ${dumpFile.length()} bytes", 0, dumpFile.length())
             }
-
             // Cleanup temp
             tmpDb.delete()
-
             return Pair(1, totalNew)
         } catch (e: Exception) {
             android.util.Log.e("wxhook:Backup", "Incremental DB backup failed: $e")
@@ -392,3 +375,4 @@ object BackupHookLocal {
             return Pair(0, 0)
         }
     }
+        File(com.nous.wxhook.db.BackupManager.BACKUP_DIR, STATE_FILE).writeText(state.toString())
