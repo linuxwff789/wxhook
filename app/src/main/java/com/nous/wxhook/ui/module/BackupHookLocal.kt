@@ -201,7 +201,8 @@ object BackupHookLocal {
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
                 "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
                 "/data/local/sqlcipher '$dbPath' << 'SQL'\n" +
-                "PRAGMA cipher_compatibility = 3;\n" +
+                "PRAGMA key = 'e9cd2ae';
+                PRAGMA cipher_compatibility = 3;\n" +
                 "PRAGMA cipher_page_size = 1024;\n" +
                 "PRAGMA kdf_iter = 4000;\n" +
                 "PRAGMA cipher_use_hmac = OFF;\n" +
@@ -221,7 +222,8 @@ object BackupHookLocal {
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
                 "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
                 "/data/local/sqlcipher '$dbPath' << 'SQL'\n" +
-                "PRAGMA cipher_compatibility = 3;\n" +
+                "PRAGMA key = 'e9cd2ae';
+                PRAGMA cipher_compatibility = 3;\n" +
                 "PRAGMA cipher_page_size = 1024;\n" +
                 "PRAGMA kdf_iter = 4000;\n" +
                 "PRAGMA cipher_use_hmac = OFF;\n" +
