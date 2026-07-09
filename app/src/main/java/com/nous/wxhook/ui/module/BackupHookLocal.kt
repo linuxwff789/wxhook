@@ -78,7 +78,7 @@ object BackupHookLocal {
 
             android.util.Log.i("wxhook:Backup", "Backup done: fileCount=$fileCount, totalSize=$totalSize")
             saveState(tag, fileCount, totalSize)
-            // saveDbConfig - TODO
+            saveDbConfig(dir.absolutePath)
             addRecord(createRecord(tag, "full", dbSize, fileCount, totalSize, "全量备份完成"))
             Result(true, "全量备份完成: ${fileCount}个文件, ${formatSize(totalSize)}")
         } catch (e: Exception) { Result(false, "备份失败: ${e.message}") }
@@ -292,6 +292,13 @@ object BackupHookLocal {
         val f = File(dir, STATE_FILE)
         return if (f.exists()) try { JSONObject(f.readText()) } catch (e: Exception) { JSONObject() } else JSONObject()
 }
+
+    private fun saveDbConfig(backupDir: String) {
+        val config = JSONObject()
+        config.put("password", DB_PASSWORD)
+        config.put("savedAt", System.currentTimeMillis())
+        File(backupDir, "db_config.json").writeText(config.toString())
+    }
 
     data class Result(val success: Boolean, val message: String)
 }
