@@ -70,7 +70,6 @@ object BackupHookLocal {
                     try {
                         Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $dst")).waitFor()
                         Runtime.getRuntime().exec(arrayOf("su", "-c", "cp -r " + src + " " + dst + " 2>/dev/null && chmod -R 644 " + dst + " 2>/dev/null")).waitFor()
-                        proc.waitFor()
                         val d = File(dst)
                         if (d.exists()) {
                             totalFiles += d.walkTopDown().filter { it.isFile }.count()
@@ -270,6 +269,12 @@ object BackupHookLocal {
     }
 
     // ── Helpers ──
+
+    private fun compressFileSu(srcPath: String, dstPath: String) {
+        try {
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "gzip -c \"" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\"")).waitFor()
+        } catch (_: Exception) {}
+    }
 
     private fun findWxPaths(): List<String> {
         val paths = mutableListOf<String>()
