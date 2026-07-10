@@ -294,7 +294,7 @@ class SettingsAdapter(
                         et.setBackgroundColor(0xFFF5F5F5.toInt())
                         et.setPadding(8, 8, 8, 8)
                     } else {
-                        et.setText(cfg.optString(item.key, item.def))
+                        et.setText(runCatching { JSONObject(File(ctx.filesDir, "settings_config.json").readText()) }.getOrDefault(JSONObject()).optString(item.key, item.def))
                         et.hint = item.hint
                     }
                     // Save on focus change
