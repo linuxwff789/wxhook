@@ -47,18 +47,19 @@ object BackupHookLocal {
                 callback?.onProgress("[$userHash] 数据库基线...", totalFiles, totalSize)
                 val dbSrc = "$wxBasePath/EnMicroMsg.db"
                 val dbGzFile = File(userDir, "EnMicroMsg_baseline.sql.gz")
-                // gzip encrypted DB (background, survives MIUI kill)
-                val gzProc = Runtime.getRuntime().exec(arrayOf("su", "-c",
-                    "gzip -c \"" + dbSrc + "\" > \"" + dbGzFile.absolutePath + "\" && chmod 644 \"" + dbGzFile.absolutePath + "\" &"))
-                gzProc.waitFor()
-                // Poll for gzip completion
-                var waited = 0
-                while (waited < 120) {
-                    if (dbGzFile.exists() && dbGzFile.length() > 100) {
-                        totalFiles++; totalSize += dbGzFile.length()
-                        break
+                // Decrypt + gzip (fixed printf '%s' + /data/local/tmp/ script)
+                val decResult = decryptAndDump(dbSrc)
+                if (decResult.startsWith("OK:")) {
+                    val gzPath = decResult.substring(3)
+                    val gzFile = java.io.File(gzPath)
+                    if (gzFile.exists()) {
+                        gzFile.renameTo(dbGzFile)
+                        totalFiles++; totalSize += gzFile.length()
                     }
-                    Thread.sleep(1000); waited++
+                }
+                if (!dbGzFile.exists()) {
+                    compressFileSu(dbSrc, dbGzFile.absolutePath)
+                    if (dbGzFile.exists()) { totalFiles++; totalSize += dbGzFile.length() }
                 }
 
                 // Save DB state
