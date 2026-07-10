@@ -258,7 +258,7 @@ object BackupHookLocal {
                 "date > " + doneFile + "\n" +  // write start time instead of "done"
                 "echo done >> " + doneFile + "\n")
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "printf \"%s\" " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
             Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '$shPath > /data/local/tmp/decrypt_exec.log 2>&1' &")).waitFor()
             var waited = 0; val maxWait = 300
             while (waited < maxWait) {
@@ -295,7 +295,7 @@ object BackupHookLocal {
                 "date > " + doneFile + "\n" +  // write start time instead of "done"
                 "echo done >> " + doneFile + "\n")
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "printf \"%s\" " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
             Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '$shPath > /data/local/tmp/decrypt_exec.log 2>&1' &")).waitFor()
             var waited = 0; val maxWait = 300
             while (waited < maxWait) {
