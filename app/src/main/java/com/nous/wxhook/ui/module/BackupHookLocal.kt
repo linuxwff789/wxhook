@@ -189,7 +189,14 @@ object BackupHookLocal {
             rcloneSync(callback)
 
             saveState(tag, totalFiles, totalSize)
-            addRecord(createRecord(tag, "incremental", totalFiles, totalSize, if (newFiles > 0) "增量: ${newFiles}个新文件" else "无新文件"))
+            val incrFiles = mutableListOf<String>()
+            val incList = dir.listFiles()?.filter { it.name.startsWith("incr_") && it.name.endsWith(".gz") }?.sortedBy { it.name } ?: emptyList()
+            for (f in incList {
+                incrFiles.add(f.name)
+            }
+            val rec = createRecord(tag, "incremental", totalFiles, totalSize, if (newFiles > 0) "增量: ${newFiles}个新文件" else "无新文件")
+            if (incrFiles.isNotEmpty()) rec.put("files", JSONArray(incrFiles))
+            addRecord(rec)
             val msg = if (newFiles > 0) "增量备份: ${newFiles}个新文件, ${formatSize(totalSize)}" else "无新文件"
             Result(true, msg)
         } catch (e: Exception) { Result(false, "增量备份失败: ${e.message}") }
