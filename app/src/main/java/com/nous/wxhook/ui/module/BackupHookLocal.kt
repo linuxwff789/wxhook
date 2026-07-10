@@ -266,3 +266,5 @@ object BackupHookLocal {
             ""
         } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptAndDump: $e"); "" }
     }
+
+}
