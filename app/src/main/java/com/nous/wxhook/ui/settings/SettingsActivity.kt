@@ -64,35 +64,80 @@ class SettingsActivity : AppCompatActivity() {
         items.add(SettingsItem.Header("☁️ 云同步"))
         items.add(SettingsItem.Toggle("启用云同步", "sync_enabled", false))
         items.add(SettingsItem.Input("远程路径", "remote_path", "gdrive:wxhook-backup", "例: gdrive:wxhook-backup"))
-        items.add(SettingsItem.Button("立即同步到云盘"))
+        items.add(SettingsItem.Button("立即同步到云盘", "sync_now"))
 
         // ── Rclone config section ──
         items.add(SettingsItem.Header("🔑 rclone 配置"))
-        items.add(SettingsItem.Info("在下方粘贴 rclone.conf 内容，包含 [remote] 和 token"))
+        items.add(SettingsItem.Info("选择云盘一键生成配置，免手动写 rclone.conf"))
+
+        // Provider quick config buttons
+        val providers = listOf(
+            "📦 Google Drive" to "gdrive drive scope=drive",
+            "📦 阿里云盘" to "aliyun aliyundrive",
+            "📦 OneDrive" to "onedrive onedrive",
+            "📦 天翼云盘" to "189cloud 189cloud",
+            "📦 WebDAV" to "webdav webdav url=http://demo.com user=admin"
+        )
+        for ((name, args) in providers) {
+            items.add(SettingsItem.Button("$name", "rclone_create::$args"))
+        }
 
         val rcloneConfText = if (rcloneCfgFile.exists()) rcloneCfgFile.readText() else ""
-        items.add(SettingsItem.Input("", "rclone_conf", rcloneConfText, "在此粘贴配置"))
-        items.add(SettingsItem.Button("保存 rclone 配置", "save_rclone"))
+        items.add(SettingsItem.Input("自定义 rclone.conf", "rclone_conf", rcloneConfText, "也可直接粘贴配置"))
+        items.add(SettingsItem.Button("保存配置", "save_rclone"))
 
         // ── Backup section ──
         items.add(SettingsItem.Header("📂 备份设置"))
         items.add(SettingsItem.Input("备份路径", "backup_path", "/sdcard/Download/wxhook_backup"))
         items.add(SettingsItem.Toggle("压缩附件", "compress", false))
 
-        recyclerView.adapter = SettingsAdapter(items) { action, data ->
+        recyclerView.adapter = SettingsAdapter(items, recyclerView) { action, data ->
             handleAction(action, data, cfg)
         }
     }
 
     private fun handleAction(action: String, data: Any?, cfg: JSONObject) {
-        when (action) {
-            "save_rclone" -> {
+        when {
+            action == "save_rclone" -> {
                 val text = data as? String ?: return
                 rcloneCfgFile.parentFile?.mkdirs()
                 rcloneCfgFile.writeText(text)
                 runOnUiThread { supportActionBar?.title = "设置 ✅ 配置已保存" }
             }
-            "立即同步到云盘" -> doSync()
+            action == "sync_now" -> doSync()
+            action.startsWith("rclone_create::") -> {
+                val argsStr = action.removePrefix("rclone_create::")
+                val parts = argsStr.split(" ")
+                if (parts.size >= 2) {
+                    val name = parts[0]; val provider = parts[1]
+                    Thread {
+                        runOnUiThread { supportActionBar?.title = "设置 ⏳ 生成 $provider 配置..." }
+                        try {
+                            rcloneCfgFile.parentFile?.mkdirs()
+                            val cmdArgs = mutableListOf(BackupHookLocal.binPath + "/rclone", "config", "create", name, provider, "--config", rcloneCfgFile.absolutePath)
+                            // Add extra args (like scope=drive)
+                            for (i in 2 until parts.size) cmdArgs.add(parts[i])
+                            val proc = Runtime.getRuntime().exec(cmdArgs.toTypedArray())
+                            val out = proc.inputStream.bufferedReader().readText()
+                            proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+                            runOnUiThread {
+                                if (rcloneCfgFile.exists() && rcloneCfgFile.readText().contains("[$name]")) {
+                                    supportActionBar?.title = "设置 ✅ $provider 配置已生成"
+                                    buildItems() // refresh
+                                } else {
+                                    supportActionBar?.title = "设置 ⚠️ $provider 需手动授权"
+                                    // Try to get the auth URL
+                                    if (out.contains("url:") || out.contains("http")) {
+                                        startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(out.lines().first { it.contains("http") }.trim())))
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            runOnUiThread { supportActionBar?.title = "设置 ❌ $provider 失败: ${e.message}" }
+                        }
+                    }.start()
+                }
+            }
         }
     }
 
@@ -120,6 +165,7 @@ class SettingsActivity : AppCompatActivity() {
 // ── Adapter ──
 class SettingsAdapter(
     private val items: List<SettingsItem>,
+    private val recyclerView: RecyclerView,
     private val onAction: (String, Any?) -> Unit
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
@@ -283,7 +329,7 @@ class SettingsAdapter(
                             }
                         }
                     }
-                    onAction(item.text, null)
+                    onAction(item.action, null) // rclone_create buttons pass action
                 }
             }
             is SettingsItem.Info -> (holder.itemView as TextView).text = item.text
