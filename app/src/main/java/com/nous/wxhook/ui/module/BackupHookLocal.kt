@@ -46,21 +46,19 @@ object BackupHookLocal {
 
                 callback?.onProgress("[$userHash] 数据库基线...", totalFiles, totalSize)
                 val dbSrc = "$wxBasePath/EnMicroMsg.db"
-                val dbDst = File(userDir, "EnMicroMsg_baseline.sql.gz")
-                // Decrypt and dump full SQL
                 val dbGzFile = File(userDir, "EnMicroMsg_baseline.sql.gz")
-                val decResult = decryptAndDump(dbSrc)
-                if (decResult.startsWith("OK:")) {
-                    val gzPath = decResult.substring(3)
-                    val gzFile = java.io.File(gzPath)
-                    if (gzFile.exists()) {
-                        gzFile.renameTo(dbGzFile)
+                // gzip encrypted DB (background, survives MIUI kill)
+                val gzProc = Runtime.getRuntime().exec(arrayOf("su", "-c",
+                    "gzip -c \"" + dbSrc + "\" > \"" + dbGzFile.absolutePath + "\" && chmod 644 \"" + dbGzFile.absolutePath + "\" &"))
+                gzProc.waitFor()
+                // Poll for gzip completion
+                var waited = 0
+                while (waited < 120) {
+                    if (dbGzFile.exists() && dbGzFile.length() > 100) {
                         totalFiles++; totalSize += dbGzFile.length()
+                        break
                     }
-                }
-                if (!dbGzFile.exists()) {
-                    compressFileSu(dbSrc, dbGzFile.absolutePath)
-                    if (dbGzFile.exists()) { totalFiles++; totalSize += dbGzFile.length() }
+                    Thread.sleep(1000); waited++
                 }
 
                 // Save DB state
@@ -344,7 +342,7 @@ object BackupHookLocal {
 
     private fun compressFileSu(srcPath: String, dstPath: String) {
         try {
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "gzip -c \"" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\"")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "gzip -c \"" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\" &")).waitFor()
         } catch (_: Exception) {}
     }
 
