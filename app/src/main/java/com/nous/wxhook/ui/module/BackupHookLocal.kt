@@ -208,10 +208,24 @@ object BackupHookLocal {
         if (cachedPassword != null) return cachedPassword!!
         cachedPassword = try {
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /data/local/tmp/.wechat_key 2>/dev/null"))
-            val key = proc.inputStream.bufferedReader().readText().trim()
+            val raw = proc.inputStream.bufferedReader().readText()
             proc.waitFor()
-            if (key.isNotEmpty()) key
-            else {
+            // Parse key=hex format: key=65396364326165 → e9cd2ae
+            val keyLine = raw.lines().firstOrNull { it.startsWith("key=") }
+            if (keyLine != null) {
+                val hex = keyLine.removePrefix("key=").trim()
+                // Convert hex to ASCII bytes
+                var pwd = ""
+                for (i in hex.indices step 2) {
+                    if (i + 1 < hex.length) {
+                        val byte = hex.substring(i, i + 2).toIntOrNull(16) ?: continue
+                        if (byte > 0) pwd += byte.toChar()
+                    }
+                }
+                if (pwd.isNotEmpty()) pwd
+                else hex // fallback: use raw hex
+            } else {
+                // Try db_config.json
                 val cfg = java.io.File(BACKUP_DIR, "db_config.json")
                 if (cfg.exists()) JSONObject(cfg.readText()).optString("password", "") else ""
             }
