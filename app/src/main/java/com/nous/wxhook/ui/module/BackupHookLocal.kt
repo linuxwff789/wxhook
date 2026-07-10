@@ -221,7 +221,7 @@ object BackupHookLocal {
             readProc.waitFor()
             Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -rf $tmpDb $outFile $tmpDir/wxhook_dec_query.sql 2>/dev/null")).waitFor()
             output
-        } catch (_: Exception) { "" }
+        } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptIncremental: $e"); "" }
     }
 
     private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
@@ -246,7 +246,7 @@ object BackupHookLocal {
             readProc.waitFor()
             Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -rf $tmpDb $outFile $tmpDir/wxhook_inc_query.sql 2>/dev/null")).waitFor()
             output
-        } catch (_: Exception) { "" }
+        } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptIncremental: $e"); "" }
     }
 
     private fun compressGzip(data: ByteArray): ByteArray {
