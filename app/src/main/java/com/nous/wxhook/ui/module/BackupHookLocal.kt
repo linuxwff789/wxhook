@@ -255,10 +255,11 @@ object BackupHookLocal {
                 "2>/dev/null | gzip -c > $gzFile 2>/dev/null\n" +
                 "chmod 644 $gzFile 2>/dev/null\n" +
                 "rm -f $tmpDir/wxhook_dec.db 2>/dev/null\n" +
-                "echo done > $doneFile\n")
+                "date > " + doneFile + "\n" +  // write start time instead of "done"
+                "echo done >> " + doneFile + "\n")
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
             Runtime.getRuntime().exec(arrayOf("su", "-c", "echo " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '$shPath > /dev/null 2>&1' &")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '$shPath > /data/local/tmp/wxhook_dec.log 2>&1' &")).waitFor()
             var waited = 0; val maxWait = 300
             while (waited < maxWait) {
                 Thread.sleep(1000); waited++
@@ -291,10 +292,11 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "< $tmpDir/wxhook_inc_query.sql 2>/dev/null > $outFile\n" +
-                "echo done > $doneFile\n")
+                "date > " + doneFile + "\n" +  // write start time instead of "done"
+                "echo done >> " + doneFile + "\n")
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
             Runtime.getRuntime().exec(arrayOf("su", "-c", "echo " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '$shPath > /dev/null 2>&1' &")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '$shPath > /data/local/tmp/wxhook_dec.log 2>&1' &")).waitFor()
             var waited = 0; val maxWait = 300
             while (waited < maxWait) {
                 Thread.sleep(1000); waited++
@@ -349,16 +351,20 @@ object BackupHookLocal {
     private fun findWxPaths(): List<String> {
         val paths = mutableListOf<String>()
         try {
-            // Use direct /data/data/ path (accessible via su, no PID needed)
-            val basePath = "/data/data/com.tencent.mm/MicroMsg"
-            val lsProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $basePath 2>/dev/null"))
-            val dirs = lsProc.inputStream.bufferedReader().readLines().filter { it.isNotBlank() }
-            lsProc.waitFor()
-            for (d in dirs) {
-                val check = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $basePath/$d/EnMicroMsg.db 2>/dev/null"))
-                val out = check.inputStream.bufferedReader().readText().trim()
-                check.waitFor()
-                if (out.isNotEmpty()) paths.add("$basePath/$d")
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
+            val pid = proc.inputStream.bufferedReader().readText().trim()
+            proc.waitFor()
+            if (pid.isNotEmpty()) {
+                val basePath = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg"
+                val lsProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $basePath 2>/dev/null"))
+                val dirs = lsProc.inputStream.bufferedReader().readLines().filter { it.isNotBlank() }
+                lsProc.waitFor()
+                for (d in dirs) {
+                    val check = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $basePath/$d/EnMicroMsg.db 2>/dev/null"))
+                    val out = check.inputStream.bufferedReader().readText().trim()
+                    check.waitFor()
+                    if (out.isNotEmpty()) paths.add("$basePath/$d")
+                }
             }
         } catch (_: Exception) {}
         return paths
