@@ -116,7 +116,7 @@ object BackupHookLocal {
                 callback?.onProgress("[$userHash] DB增量...", totalFiles, totalSize)
                 val dbSrc = "$wxBasePath/EnMicroMsg.db"
                 val incrSql = decryptIncremental(dbSrc, lastRowId)
-                if (incrSql.isNotEmpty()) {
+                if (incrSql.isNotEmpty() && incrSql.contains("INSERT INTO message")) {
                     val incrFile = File(userDir, "incr_$tag.sql.gz")
                     incrFile.writeBytes(compressGzip(incrSql.toByteArray()))
                     totalFiles++; totalSize += incrFile.length(); newFiles++
