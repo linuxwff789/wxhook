@@ -54,7 +54,7 @@ object BackupHookLocal {
 
                 callback?.onProgress("[$userHash] 数据库基线...", totalFiles, totalSize)
                 val dbSrc = "$wxBasePath/EnMicroMsg.db"
-                val dbGzFile = File(userDir, "EnMicroMsg_baseline.sql.gz")
+                val dbGzFile = File(userDir, "EnMicroMsg_baseline" + ext())
                 // Decrypt + gzip (fixed printf '%s' + /data/local/tmp/ script)
                 val decResult = decryptAndDump(dbSrc)
                 if (decResult.startsWith("OK:")) {
@@ -160,7 +160,7 @@ object BackupHookLocal {
                                 "gzip -dc " + gzFile.absolutePath + " 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
                             proc.inputStream.bufferedReader().readText().trim().toLong()
                         }.getOrDefault(lastRowId)
-                        val incrFile = File(userDir, "incr_${incrFrom}_to_${incrTo}.sql.gz")
+                        val incrFile = File(userDir, "incr_${incrFrom}_to_${incrTo}" + ext())
                         gzFile.renameTo(incrFile)
                         totalFiles++; totalSize += incrFile.length(); newFiles++
                         updateDbState(userDir, tag, incrTo.toString())
@@ -204,7 +204,7 @@ object BackupHookLocal {
 
             saveState(tag, totalFiles, totalSize)
             val incrFiles = mutableListOf<String>()
-            val incList = dir.listFiles()?.filter { it.name.startsWith("incr_") && it.name.endsWith(".gz") }?.sortedBy { it.name } ?: emptyList()
+            val incList = dir.listFiles()?.filter { it.name.startsWith("incr_") && it.name.endsWith(ext()) }?.sortedBy { it.name } ?: emptyList()
             for (f in incList) {
                 incrFiles.add(f.name)
             }
@@ -253,6 +253,16 @@ object BackupHookLocal {
 
     private var cachedPassword: String? = null
 
+    private fun ext() = if (useZstd()) ".sql.zst" else ".sql.gz"
+
+    private fun useZstd(): Boolean {
+        try {
+            val cfg = java.io.File("/sdcard/Download/wxhook_backup/db_config.json")
+            if (cfg.exists()) return JSONObject(cfg.readText()).optBoolean("zstd", false)
+        } catch (_: Exception) {}
+        return false
+    }
+
     private fun getDbPassword(): String {
         if (cachedPassword != null) return cachedPassword!!
         cachedPassword = try {
@@ -287,7 +297,7 @@ object BackupHookLocal {
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
         val shPath = "/data/local/tmp/decrypt_full.sh"
         val doneFile = "$tmpDir/decrypt_full_done.txt"
-        val gzFile = "$tmpDir/EnMicroMsg_baseline.sql.gz"
+        val gzFile = "$tmpDir/EnMicroMsg_baseline" + ext()
         return try {
             val pwd = getDbPassword()
             val script = ("#!/system/bin/sh\n" +
@@ -302,7 +312,7 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message;' " +
-                "2>/dev/null | gzip -c > $gzFile 2>/dev/null\n" +
+                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -19" else "gzip -c") + " > $gzFile 2>/dev/null\n" +
                 "chmod 644 $gzFile 2>/dev/null\n" +
                 "rm -f $tmpDir/wxhook_dec.db 2>/dev/null\n" +
                 "date > " + doneFile + "\n" +  // write start time instead of "done"
@@ -341,7 +351,7 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
-                "2>/dev/null | gzip -c > $outFile.gz\n" +
+                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -19" else "gzip -c") + " > $outFile.gz\n" +
                 "date > " + doneFile + "\n")
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
             Runtime.getRuntime().exec(arrayOf("su", "-c", "printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
@@ -392,7 +402,7 @@ object BackupHookLocal {
 
     private fun compressFileSu(srcPath: String, dstPath: String) {
         try {
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "gzip -c \"" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\" &")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "" + (if (useZstd()) "${binDir}/zstd -c -19" else "gzip -c") + " \"" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\" &")).waitFor()
         } catch (_: Exception) {}
     }
 

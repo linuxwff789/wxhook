@@ -90,6 +90,7 @@ class SettingsActivity : AppCompatActivity() {
         items.add(SettingsItem.Header("📂 备份设置"))
         items.add(SettingsItem.Input("备份路径", "backup_path", "/sdcard/Download/wxhook_backup"))
         items.add(SettingsItem.Toggle("压缩附件", "compress", false))
+        items.add(SettingsItem.Toggle("zstd压缩(更快更小)", "zstd", false))
 
         recyclerView.adapter = SettingsAdapter(items, recyclerView) { action, data ->
             handleAction(action, data, cfg)
@@ -279,6 +280,13 @@ class SettingsAdapter(
                     val o = runCatching { JSONObject(File(ctx.filesDir, "settings_config.json").readText()) }.getOrDefault(JSONObject())
                     o.put(item.key, checked)
                     File(ctx.filesDir, "settings_config.json").writeText(o.toString())
+                    // Also sync zstd setting to db_config.json for BackupHookLocal
+                    if (item.key == "zstd") {
+                        val dbCfg = File("/sdcard/Download/wxhook_backup/db_config.json")
+                        val d = runCatching { JSONObject(dbCfg.readText()) }.getOrDefault(JSONObject())
+                        d.put("zstd", checked)
+                        dbCfg.writeText(d.toString())
+                    }
                 }
             }
             is SettingsItem.Input -> {
