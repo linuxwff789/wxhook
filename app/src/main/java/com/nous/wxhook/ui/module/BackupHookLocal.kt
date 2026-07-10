@@ -201,10 +201,13 @@ object BackupHookLocal {
     private fun decryptAndDump(dbPath: String): String {
         // Use -cmd to set PRAGMAs (works on open DB), pipe SELECT via stdin
         return try {
+            val tmpDb = "/data/local/tmp/wxhook_dec.db"
+            // Copy DB to temp (sqlcipher cannot open /proc/PID/root/ paths)
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"" + dbPath + "\" " + tmpDb + " && chmod 644 " + tmpDb + " 2>/dev/null")).waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
             val outFile = "/data/local/tmp/wxhook_dec_out.sql"
             Runtime.getRuntime().exec(arrayOf("su", "-c", "echo \"SELECT * FROM message;\" > /data/local/tmp/wxhook_dec_query.sql")).waitFor()
             val cmd = "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
-                "/data/local/sqlcipher '$dbPath' " +
+                "/data/local/sqlcipher $tmpDb " +
                 "-cmd 'PRAGMA key = \"e9cd2ae\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
@@ -223,10 +226,12 @@ object BackupHookLocal {
 
     private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
         return try {
+            val tmpDb = "/data/local/tmp/wxhook_inc.db"
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"" + dbPath + "\" " + tmpDb + " && chmod 644 " + tmpDb + " 2>/dev/null")).waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
             val outFile = "/data/local/tmp/wxhook_inc_out.sql"
             Runtime.getRuntime().exec(arrayOf("su", "-c", "echo \"SELECT * FROM message WHERE rowid > $lastRowId;\" > /data/local/tmp/wxhook_inc_query.sql")).waitFor()
             val cmd = "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
-                "/data/local/sqlcipher '$dbPath' " +
+                "/data/local/sqlcipher $tmpDb " +
                 "-cmd 'PRAGMA key = \"e9cd2ae\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
