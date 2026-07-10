@@ -203,53 +203,78 @@ object BackupHookLocal {
     // ── DB incremental backup ──
 
     private fun decryptAndDump(dbPath: String): String {
-        // Copy DB to sdcard tmp (sqlcipher cannot open /proc/PID/root/), then decrypt
+        // Use base64 script + setsid to survive MIUI background kill
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
-        val tmpDb = "$tmpDir/wxhook_dec.db"
-        val outFile = "$tmpDir/wxhook_dec_out.sql"
+        val shPath = "$tmpDir/decrypt_full.sh"
+        val doneFile = "$tmpDir/decrypt_full_done.txt"
+        val gzFile = "$tmpDir/EnMicroMsg_baseline.sql.gz"
         return try {
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $tmpDir && cp \"" + dbPath + "\" $tmpDb && chmod 644 $tmpDb 2>/dev/null")).waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "echo \"SELECT * FROM message;\" > $tmpDir/wxhook_dec_query.sql 2>/dev/null")).waitFor()
-            val cmd = "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
-                "/data/local/sqlcipher $tmpDb " +
+            val script = ("#!/system/bin/sh\n" +
+                "mkdir -p $tmpDir\n" +
+                "cp \"" + dbPath + "\" $tmpDir/wxhook_dec.db 2>/dev/null\n" +
+                "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
+                "/data/local/sqlcipher $tmpDir/wxhook_dec.db " +
                 "-cmd 'PRAGMA key = \"e9cd2ae\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
                 "-cmd 'PRAGMA kdf_iter = 4000;' " +
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
-                "< $tmpDir/wxhook_dec_query.sql 2>/dev/null > $outFile"
-            Runtime.getRuntime().exec(arrayOf("su", "-c", cmd)).waitFor(180, java.util.concurrent.TimeUnit.SECONDS)
-            val readProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $outFile 2>/dev/null"))
-            val output = readProc.inputStream.bufferedReader().readText()
-            readProc.waitFor()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -rf $tmpDb $outFile $tmpDir/wxhook_dec_query.sql 2>/dev/null")).waitFor()
-            output
-        } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptIncremental: $e"); "" }
+                "2>/dev/null | gzip -c > $gzFile 2>/dev/null\n" +
+                "chmod 644 $gzFile 2>/dev/null\n" +
+                "rm -f $tmpDir/wxhook_dec.db 2>/dev/null\n" +
+                "echo done > $doneFile\n")
+            val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "echo " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "setsid $shPath > /dev/null 2>&1 &")).waitFor()
+            var waited = 0; val maxWait = 300
+            while (waited < maxWait) {
+                Thread.sleep(1000); waited++
+                if (java.io.File(doneFile).exists()) {
+                    java.io.File(doneFile).delete()
+                    if (java.io.File(gzFile).exists()) return "OK:$gzFile"
+                    break
+                }
+            }
+            ""
+        } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptAndDump: $e"); "" }
     }
-
     private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
-        val tmpDb = "$tmpDir/wxhook_inc.db"
+        val shPath = "$tmpDir/decrypt_inc.sh"
+        val doneFile = "$tmpDir/decrypt_inc_done.txt"
         val outFile = "$tmpDir/wxhook_inc_out.sql"
         return try {
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $tmpDir && cp \"" + dbPath + "\" $tmpDb && chmod 644 $tmpDb 2>/dev/null")).waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "echo \"SELECT * FROM message WHERE rowid > $lastRowId;\" > $tmpDir/wxhook_inc_query.sql 2>/dev/null")).waitFor()
-            val cmd = "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
-                "/data/local/sqlcipher $tmpDb " +
+            val script = ("#!/system/bin/sh\n" +
+                "mkdir -p $tmpDir\n" +
+                "cp \"" + dbPath + "\" $tmpDir/wxhook_inc.db 2>/dev/null\n" +
+                "echo \"SELECT * FROM message WHERE rowid > " + lastRowId + ";\" > $tmpDir/wxhook_inc_query.sql\n" +
+                "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
+                "/data/local/sqlcipher $tmpDir/wxhook_inc.db " +
                 "-cmd 'PRAGMA key = \"e9cd2ae\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
                 "-cmd 'PRAGMA kdf_iter = 4000;' " +
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
-                "< $tmpDir/wxhook_inc_query.sql 2>/dev/null > $outFile"
-            Runtime.getRuntime().exec(arrayOf("su", "-c", cmd)).waitFor(180, java.util.concurrent.TimeUnit.SECONDS)
-            val readProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $outFile 2>/dev/null"))
-            val output = readProc.inputStream.bufferedReader().readText()
-            readProc.waitFor()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -rf $tmpDb $outFile $tmpDir/wxhook_inc_query.sql 2>/dev/null")).waitFor()
-            output
+                "< $tmpDir/wxhook_inc_query.sql 2>/dev/null > $outFile\n" +
+                "echo done > $doneFile\n")
+            val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "echo " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "setsid $shPath > /dev/null 2>&1 &")).waitFor()
+            var waited = 0; val maxWait = 300
+            while (waited < maxWait) {
+                Thread.sleep(1000); waited++
+                if (java.io.File(doneFile).exists()) {
+                    java.io.File(doneFile).delete()
+                    val readProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $outFile 2>/dev/null"))
+                    val output = readProc.inputStream.bufferedReader().readText()
+                    readProc.waitFor()
+                    Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f $tmpDir/wxhook_inc.db $outFile $tmpDir/wxhook_inc_query.sql $doneFile $shPath 2>/dev/null")).waitFor()
+                    return output
+                }
+            }
+            ""
         } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptIncremental: $e"); "" }
     }
 
