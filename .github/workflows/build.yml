@@ -26,16 +26,16 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Setup Go for rclone
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
       - name: Compile rclone for Android
         run: |
           cd /tmp
           curl -sL https://github.com/rclone/rclone/archive/refs/tags/v1.69.2.tar.gz | tar xz
           cd rclone-1.69.2
-          # Install Go
-          wget -q https://go.dev/dl/go1.23.4.linux-amd64.tar.gz
-          tar -C /usr/local -xzf go1.23.4.linux-amd64.tar.gz
-          export PATH=/usr/local/go/bin:$PATH
-          # Cross-compile for ARM64 Android
           GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o rclone-android
           ls -lh rclone-android
           cp rclone-android $GITHUB_WORKSPACE/app/src/main/assets/bin/rclone
