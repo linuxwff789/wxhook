@@ -34,7 +34,7 @@
         <activity android:name=".ui.search.SearchActivity" />
         <activity android:name=".ui.backup.BackupActivity" />
         <activity android:name=".ui.merge.MergeActivity" />
-        <activity android:name=".ui.settings.SettingsActivity" />
+        <activity android:name=".ui.settings.SettingsActivity" android:exported="true" />
 
         <receiver
             android:name=".receiver.MessageReceiver"
