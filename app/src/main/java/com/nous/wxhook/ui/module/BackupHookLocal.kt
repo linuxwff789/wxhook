@@ -21,6 +21,11 @@ object BackupHookLocal {
     private const val DB_STATE_FILE = "db_state.json"
     private const val RCLONE_REMOTE = "gdrive:wxhook-backup"
     private const val BACKUP_DIR = "/sdcard/Download/wxhook_backup"
+    private var binDir = "/data/data/com.termux/files/usr/bin"
+
+    fun init(ctx: android.content.Context) {
+        binDir = ctx.filesDir.absolutePath + "/bin"
+    }
 
     interface ProgressCallback {
         fun onProgress(current: String, fileCount: Long, totalSize: Long)
@@ -178,8 +183,8 @@ object BackupHookLocal {
 
     private fun gitAddAndCommit(tag: String) {
         try {
-            val git = "/data/data/com.termux/files/usr/bin/git"
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "HOME=/data/local/tmp cd $BACKUP_DIR && " + git + " add -A && " + git + " commit -m 'backup: $tag' --allow-empty")).waitFor()
+            val g = binDir + "/git"
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "HOME=/data/local/tmp cd $BACKUP_DIR && " + g + " add -A && " + g + " commit -m 'backup: $tag' --allow-empty")).waitFor()
         } catch (_: Exception) {}
     }
 
@@ -244,8 +249,8 @@ object BackupHookLocal {
             val script = ("#!/system/bin/sh\n" +
                 "mkdir -p $tmpDir\n" +
                 "cp \"" + dbPath + "\" $tmpDir/wxhook_dec.db 2>/dev/null\n" +
-                "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
-                "/data/local/sqlcipher $tmpDir/wxhook_dec.db " +
+                "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
+                "${binDir}/sqlcipher $tmpDir/wxhook_dec.db " +
                 "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
@@ -284,8 +289,8 @@ object BackupHookLocal {
                 "mkdir -p $tmpDir\n" +
                 "cp \"" + dbPath + "\" $tmpDir/wxhook_inc.db 2>/dev/null\n" +
                 "echo \"SELECT * FROM message WHERE rowid > " + lastRowId + ";\" > $tmpDir/wxhook_inc_query.sql\n" +
-                "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
-                "/data/local/sqlcipher $tmpDir/wxhook_inc.db " +
+                "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
+                "${binDir}/sqlcipher $tmpDir/wxhook_inc.db " +
                 "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
