@@ -138,20 +138,25 @@ object BackupHookLocal {
 
                 val dbState = loadDbState(userDir)
                 val lastRowId = dbState.optLong("lastMessageRowId", 0)
+                if (lastRowId <= 0) {
+                    callback?.onProgress("[$userHash] 无基线数据，请先全量备份", totalFiles, totalSize)
+                    continue
+                }
 
                 callback?.onProgress("[$userHash] DB增量...", totalFiles, totalSize)
                 val dbSrc = "$wxBasePath/EnMicroMsg.db"
-                val incrSql = decryptIncremental(dbSrc, lastRowId)
-                if (incrSql.isNotEmpty() && incrSql.contains("INSERT INTO message")) {
-                    val lastRowIdNew = runCatching {
-                        val line = incrSql.lines().lastOrNull { it.contains("INSERT INTO ") }
-                        line?.substringAfter("VALUES(")?.substringBefore(",")?.toLongOrNull() ?: 0L
-                    }.getOrDefault(0L)
-                    val incrFile = File(userDir, "incr_${lastRowId}_to_${lastRowIdNew}.sql.gz")
-                    incrFile.writeBytes(compressGzip(incrSql.toByteArray()))
-                    totalFiles++; totalSize += incrFile.length(); newFiles++
-                    // Update DB state
-                    updateDbState(userDir, tag, incrSql)
+                val incResult = decryptIncremental(dbSrc, lastRowId)
+                if (incResult.startsWith("OK:")) {
+                    val gzPath = incResult.substring(3)
+                    val gzFile = java.io.File(gzPath)
+                    if (gzFile.exists()) {
+                        val incrFile = File(userDir, "incr_${lastRowId}_to_${lastRowId}.sql.gz")
+                        gzFile.renameTo(incrFile)
+                        totalFiles++; totalSize += incrFile.length(); newFiles++
+                        // Update DB state (use lastRowId as the new rowid - caller will update later)
+                        updateDbState(userDir, tag, lastRowId.toString())
+                    }
+                }
                 }
             }
 
@@ -325,7 +330,7 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
-                "2>/dev/null > $outFile\n" +
+                "2>/dev/null | gzip -c > $outFile.gz\n" +
                 "date > " + doneFile + "\n")
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
             Runtime.getRuntime().exec(arrayOf("su", "-c", "printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
@@ -335,11 +340,11 @@ object BackupHookLocal {
                 Thread.sleep(1000); waited++
                 if (java.io.File(doneFile).exists()) {
                     java.io.File(doneFile).delete()
-                    val readProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $outFile 2>/dev/null"))
-                    val output = readProc.inputStream.bufferedReader().readText()
-                    readProc.waitFor()
-                    Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f $tmpDir/wxhook_inc.db $outFile $shPath /data/local/tmp/decrypt_exec.log 2>/dev/null")).waitFor()
-                    return output
+                    // Return the gz path instead of the full text
+                    val gzFile = "$outFile.gz"
+                    val gz = java.io.File(gzFile)
+                    if (gz.exists()) return "OK:$gzFile"
+                    break
                 }
             }
             ""
@@ -362,18 +367,13 @@ object BackupHookLocal {
         return if (f.exists()) try { JSONObject(f.readText()) } catch (_: Exception) { JSONObject() } else JSONObject()
     }
 
-    private fun updateDbState(userDir: File, tag: String, incrSql: String) {
+    private fun updateDbState(userDir: File, tag: String, newRowId: String) {
         val state = loadDbState(userDir)
         state.put("lastBackupTag", tag)
         state.put("lastBackupTime", System.currentTimeMillis())
         state.put("incrCount", state.optInt("incrCount", 0) + 1)
-        // Extract last rowid from INSERT statements
-        val lastLine = incrSql.lines().lastOrNull { it.contains("INSERT INTO ") }
-        if (lastLine != null) {
-            val v = lastLine.substringAfter("VALUES(").substringBefore(",")
-            val rowId = v.toLongOrNull()
-            if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
-        }
+        val rowId = newRowId.toLongOrNull()
+        if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
         File(userDir, DB_STATE_FILE).writeText(state.toString())
     }
 
@@ -448,4 +448,3 @@ object BackupHookLocal {
     }
 
     data class Result(val success: Boolean, val message: String)
-}
