@@ -202,6 +202,23 @@ object BackupHookLocal {
 
     // ── DB incremental backup ──
 
+    private var cachedPassword: String? = null
+
+    private fun getDbPassword(): String {
+        if (cachedPassword != null) return cachedPassword!!
+        cachedPassword = try {
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /data/local/tmp/.wechat_key 2>/dev/null"))
+            val key = proc.inputStream.bufferedReader().readText().trim()
+            proc.waitFor()
+            if (key.isNotEmpty()) key
+            else {
+                val cfg = java.io.File(BACKUP_DIR, "db_config.json")
+                if (cfg.exists()) JSONObject(cfg.readText()).optString("password", "") else ""
+            }
+        } catch (_: Exception) { "" }
+        return cachedPassword ?: ""
+    }
+
     private fun decryptAndDump(dbPath: String): String {
         // Use base64 script + setsid to survive MIUI background kill
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
@@ -209,12 +226,13 @@ object BackupHookLocal {
         val doneFile = "$tmpDir/decrypt_full_done.txt"
         val gzFile = "$tmpDir/EnMicroMsg_baseline.sql.gz"
         return try {
+            val pwd = getDbPassword()
             val script = ("#!/system/bin/sh\n" +
                 "mkdir -p $tmpDir\n" +
                 "cp \"" + dbPath + "\" $tmpDir/wxhook_dec.db 2>/dev/null\n" +
                 "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
                 "/data/local/sqlcipher $tmpDir/wxhook_dec.db " +
-                "-cmd 'PRAGMA key = \"e9cd2ae\";' " +
+                "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
                 "-cmd 'PRAGMA kdf_iter = 4000;' " +
@@ -245,13 +263,14 @@ object BackupHookLocal {
         val doneFile = "$tmpDir/decrypt_inc_done.txt"
         val outFile = "$tmpDir/wxhook_inc_out.sql"
         return try {
+            val pwd = getDbPassword()
             val script = ("#!/system/bin/sh\n" +
                 "mkdir -p $tmpDir\n" +
                 "cp \"" + dbPath + "\" $tmpDir/wxhook_inc.db 2>/dev/null\n" +
                 "echo \"SELECT * FROM message WHERE rowid > " + lastRowId + ";\" > $tmpDir/wxhook_inc_query.sql\n" +
                 "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
                 "/data/local/sqlcipher $tmpDir/wxhook_inc.db " +
-                "-cmd 'PRAGMA key = \"e9cd2ae\";' " +
+                "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
                 "-cmd 'PRAGMA kdf_iter = 4000;' " +
@@ -371,7 +390,7 @@ object BackupHookLocal {
     }
 
     private fun saveDbConfig() {
-        val config = JSONObject().apply { put("password", "e9cd2ae"); put("savedAt", System.currentTimeMillis()) }
+        val config = JSONObject().apply { put("password", getDbPassword()); put("savedAt", System.currentTimeMillis()) }
         File(BACKUP_DIR, DB_CONFIG_FILE).writeText(config.toString())
     }
 
