@@ -296,7 +296,6 @@ object BackupHookLocal {
             val script = ("#!/system/bin/sh\n" +
                 "mkdir -p $tmpDir\n" +
                 "cp \"" + dbPath + "\" $tmpDir/wxhook_inc.db 2>/dev/null\n" +
-                "echo \"SELECT * FROM message WHERE rowid > " + lastRowId + ";\" > $tmpDir/wxhook_inc_query.sql\n" +
                 "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
                 "${binDir}/sqlcipher $tmpDir/wxhook_inc.db " +
                 "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
@@ -305,13 +304,13 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA kdf_iter = 4000;' " +
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
-                "< $tmpDir/wxhook_inc_query.sql 2>/dev/null > $outFile\n" +
-                "date > " + doneFile + "\n" +  // write start time instead of "done"
-                "echo done >> " + doneFile + "\n")
+                "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
+                "2>/dev/null > $outFile\n" +
+                "date > " + doneFile + "\n")
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
             Runtime.getRuntime().exec(arrayOf("su", "-c", "printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
             Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '$shPath > /data/local/tmp/decrypt_exec.log 2>&1' &")).waitFor()
-            var waited = 0; val maxWait = 300
+            var waited = 0; val maxWait = 120
             while (waited < maxWait) {
                 Thread.sleep(1000); waited++
                 if (java.io.File(doneFile).exists()) {
@@ -319,7 +318,7 @@ object BackupHookLocal {
                     val readProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $outFile 2>/dev/null"))
                     val output = readProc.inputStream.bufferedReader().readText()
                     readProc.waitFor()
-                    Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f $tmpDir/wxhook_inc.db $outFile $tmpDir/wxhook_inc_query.sql $doneFile $shPath 2>/dev/null")).waitFor()
+                    Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f $tmpDir/wxhook_inc.db $outFile $shPath /data/local/tmp/decrypt_exec.log 2>/dev/null")).waitFor()
                     return output
                 }
             }
