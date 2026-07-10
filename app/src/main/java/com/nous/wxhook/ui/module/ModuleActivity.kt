@@ -1,5 +1,6 @@
 package com.nous.wxhook.ui.module
 
+import android.content.Intent
 import android.content.Context
 import org.json.JSONObject
 import android.graphics.Color
@@ -51,6 +52,16 @@ class ModuleActivity : AppCompatActivity() {
             textSize = 22f; setTextColor(0xFF6200EE.toInt())
             typeface = Typeface.DEFAULT_BOLD
             setPadding(0, 0, 0, dp(16))
+        })
+
+        // Settings button (gear icon)
+        root.addView(Button(this).apply {
+            text = "⚙️ 设置"
+            textSize = 13f; setTextColor(0xFF6200EE.toInt())
+            setBackgroundColor(Color.TRANSPARENT)
+            gravity = Gravity.END
+            setOnClickListener { startActivity(Intent(this@ModuleActivity, com.nous.wxhook.ui.settings.SettingsActivity::class.java)) }
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.END }
         })
 
         // ── Status card ──
