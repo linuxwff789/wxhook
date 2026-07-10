@@ -49,12 +49,18 @@ object BackupHookLocal {
                 val dbDst = File(userDir, "EnMicroMsg_baseline.sql.gz")
                 // Decrypt and dump full SQL
                 val dbGzFile = File(userDir, "EnMicroMsg_baseline.sql.gz")
-                val sqlDump = decryptAndDump(dbSrc)
-                if (sqlDump.isNotEmpty()) {
-                    dbGzFile.writeBytes(compressGzip(sqlDump.toByteArray()))
-                    totalFiles++; totalSize += dbGzFile.length()
-                } else {
-                    // Fallback: compress raw encrypted DB (decryption failed)
+                val decResult = decryptAndDump(dbSrc)
+                if (decResult.startsWith("OK:")) {
+                    val gzPath = decResult.substring(3)
+                    val gzFile = java.io.File(gzPath)
+                    if (gzFile.exists()) {
+                        // Move to user dir
+                        gzFile.renameTo(dbGzFile)
+                        totalFiles++; totalSize += gzFile.length()
+                    }
+                }
+                if (!dbGzFile.exists()) {
+                    // Fallback: compress raw encrypted DB
                     compressFileSu(dbSrc, dbGzFile.absolutePath)
                     if (dbGzFile.exists()) { totalFiles++; totalSize += dbGzFile.length() }
                 }
