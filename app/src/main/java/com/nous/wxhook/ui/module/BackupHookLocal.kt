@@ -234,32 +234,26 @@ object BackupHookLocal {
     }
 
     private fun decryptAndDump(dbPath: String): String {
-        // Use base64 script + setsid to survive MIUI background kill
+        // Direct command via sh -c & (no script file, no chmod issues)
+        val pwd = getDbPassword()
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
-        val shPath = "$tmpDir/decrypt_full.sh"
         val doneFile = "$tmpDir/decrypt_full_done.txt"
         val gzFile = "$tmpDir/EnMicroMsg_baseline.sql.gz"
+        val cmd = "mkdir -p $tmpDir && " +
+            "cp \"" + dbPath + "\" $tmpDir/wxhook_dec.db && " +
+            "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
+            "/data/local/sqlcipher $tmpDir/wxhook_dec.db " +
+            "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
+            "-cmd 'PRAGMA cipher_compatibility = 3;' " +
+            "-cmd 'PRAGMA cipher_page_size = 1024;' " +
+            "-cmd 'PRAGMA kdf_iter = 4000;' " +
+            "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
+            "-cmd '.mode insert' " +
+            "2>/dev/null | gzip -c > $gzFile && " +
+            "rm -f $tmpDir/wxhook_dec.db && " +
+            "echo done > $doneFile"
         return try {
-            val pwd = getDbPassword()
-            val script = ("#!/system/bin/sh\n" +
-                "mkdir -p $tmpDir\n" +
-                "cp \"" + dbPath + "\" $tmpDir/wxhook_dec.db 2>/dev/null\n" +
-                "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
-                "/data/local/sqlcipher $tmpDir/wxhook_dec.db " +
-                "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
-                "-cmd 'PRAGMA cipher_compatibility = 3;' " +
-                "-cmd 'PRAGMA cipher_page_size = 1024;' " +
-                "-cmd 'PRAGMA kdf_iter = 4000;' " +
-                "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
-                "-cmd '.mode insert' " +
-                "2>/dev/null | gzip -c > $gzFile 2>/dev/null\n" +
-                "chmod 644 $gzFile 2>/dev/null\n" +
-                "rm -f $tmpDir/wxhook_dec.db 2>/dev/null\n" +
-                "date > " + doneFile + "\n" +  // write start time instead of "done"
-                "echo done >> " + doneFile + "\n")
-            val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "printf \"%s\" " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '$shPath > /data/local/tmp/wxhook_dec.log 2>&1' &")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '" + cmd.replace("'", "'\\''") + "' &")).waitFor()
             var waited = 0; val maxWait = 300
             while (waited < maxWait) {
                 Thread.sleep(1000); waited++
@@ -272,143 +266,3 @@ object BackupHookLocal {
             ""
         } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptAndDump: $e"); "" }
     }
-    private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
-        val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
-        val shPath = "$tmpDir/decrypt_inc.sh"
-        val doneFile = "$tmpDir/decrypt_inc_done.txt"
-        val outFile = "$tmpDir/wxhook_inc_out.sql"
-        return try {
-            val pwd = getDbPassword()
-            val script = ("#!/system/bin/sh\n" +
-                "mkdir -p $tmpDir\n" +
-                "cp \"" + dbPath + "\" $tmpDir/wxhook_inc.db 2>/dev/null\n" +
-                "echo \"SELECT * FROM message WHERE rowid > " + lastRowId + ";\" > $tmpDir/wxhook_inc_query.sql\n" +
-                "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
-                "/data/local/sqlcipher $tmpDir/wxhook_inc.db " +
-                "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
-                "-cmd 'PRAGMA cipher_compatibility = 3;' " +
-                "-cmd 'PRAGMA cipher_page_size = 1024;' " +
-                "-cmd 'PRAGMA kdf_iter = 4000;' " +
-                "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
-                "-cmd '.mode insert' " +
-                "< $tmpDir/wxhook_inc_query.sql 2>/dev/null > $outFile\n" +
-                "date > " + doneFile + "\n" +  // write start time instead of "done"
-                "echo done >> " + doneFile + "\n")
-            val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "printf \"%s\" " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '$shPath > /data/local/tmp/wxhook_dec.log 2>&1' &")).waitFor()
-            var waited = 0; val maxWait = 300
-            while (waited < maxWait) {
-                Thread.sleep(1000); waited++
-                if (java.io.File(doneFile).exists()) {
-                    java.io.File(doneFile).delete()
-                    val readProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $outFile 2>/dev/null"))
-                    val output = readProc.inputStream.bufferedReader().readText()
-                    readProc.waitFor()
-                    Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f $tmpDir/wxhook_inc.db $outFile $tmpDir/wxhook_inc_query.sql $doneFile $shPath 2>/dev/null")).waitFor()
-                    return output
-                }
-            }
-            ""
-        } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptIncremental: $e"); "" }
-    }
-
-    private fun compressGzip(data: ByteArray): ByteArray {
-        val bos = java.io.ByteArrayOutputStream()
-        java.util.zip.GZIPOutputStream(bos).use { it.write(data) }
-        return bos.toByteArray()
-    }
-
-    private fun saveDbState(userDir: File, tag: String) {
-        val state = JSONObject().apply { put("lastBackupTag", tag); put("lastBackupTime", System.currentTimeMillis()) }
-        File(userDir, DB_STATE_FILE).writeText(state.toString())
-    }
-
-    private fun loadDbState(userDir: File): JSONObject {
-        val f = File(userDir, DB_STATE_FILE)
-        return if (f.exists()) try { JSONObject(f.readText()) } catch (_: Exception) { JSONObject() } else JSONObject()
-    }
-
-    private fun updateDbState(userDir: File, tag: String, incrSql: String) {
-        val state = loadDbState(userDir)
-        state.put("lastBackupTag", tag)
-        state.put("lastBackupTime", System.currentTimeMillis())
-        state.put("incrCount", state.optInt("incrCount", 0) + 1)
-        // Try to extract last rowid from INSERT statements
-        val lastInsert = incrSql.lines().lastOrNull { it.contains("INSERT INTO message") }
-        // Save state
-        File(userDir, DB_STATE_FILE).writeText(state.toString())
-    }
-
-    // ── Helpers ──
-
-    private fun compressFileSu(srcPath: String, dstPath: String) {
-        try {
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "gzip -c \"" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\"")).waitFor()
-        } catch (_: Exception) {}
-    }
-
-    private fun findWxPaths(): List<String> {
-        val paths = mutableListOf<String>()
-        try {
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
-            val pid = proc.inputStream.bufferedReader().readText().trim()
-            proc.waitFor()
-            if (pid.isNotEmpty()) {
-                val basePath = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg"
-                val lsProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $basePath 2>/dev/null"))
-                val dirs = lsProc.inputStream.bufferedReader().readLines().filter { it.isNotBlank() }
-                lsProc.waitFor()
-                for (d in dirs) {
-                    val check = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $basePath/$d/EnMicroMsg.db 2>/dev/null"))
-                    val out = check.inputStream.bufferedReader().readText().trim()
-                    check.waitFor()
-                    if (out.isNotEmpty()) paths.add("$basePath/$d")
-                }
-            }
-        } catch (_: Exception) {}
-        return paths
-    }
-
-    private fun formatSize(bytes: Long): String {
-        return when {
-            bytes > 1024 * 1024 * 1024 -> "%.1f GB".format(bytes.toFloat() / 1024 / 1024 / 1024)
-            bytes > 1024 * 1024 -> "%.1f MB".format(bytes.toFloat() / 1024 / 1024)
-            bytes > 1024 -> "%.1f KB".format(bytes.toFloat() / 1024)
-            else -> "$bytes B"
-        }
-    }
-
-    private fun createRecord(tag: String, type: String, fileCount: Long, totalSize: Long, message: String): JSONObject {
-        return JSONObject().apply {
-            put("tag", tag); put("type", type); put("time", System.currentTimeMillis())
-            put("fileCount", fileCount); put("totalSize", totalSize); put("message", message)
-        }
-    }
-
-    private fun addRecord(record: JSONObject) {
-        val dir = File(BACKUP_DIR)
-        if (!dir.exists()) dir.mkdirs()
-        val f = File(dir, RECORDS_FILE)
-        val arr = try { JSONArray(f.readText()) } catch (_: Exception) { JSONArray() }
-        arr.put(record); while (arr.length() > 50) arr.remove(0)
-        f.writeText(arr.toString())
-    }
-
-    private fun saveState(tag: String, count: Long, size: Long) {
-        val state = JSONObject().apply { put("lastBackupTime", System.currentTimeMillis()); put("lastBackupTag", tag); put("fileCount", count); put("totalSize", size) }
-        File(BACKUP_DIR, STATE_FILE).writeText(state.toString())
-    }
-
-    private fun loadState(): JSONObject {
-        val f = File(BACKUP_DIR, STATE_FILE)
-        return if (f.exists()) try { JSONObject(f.readText()) } catch (_: Exception) { JSONObject() } else JSONObject()
-    }
-
-    private fun saveDbConfig() {
-        val config = JSONObject().apply { put("password", getDbPassword()); put("savedAt", System.currentTimeMillis()) }
-        File(BACKUP_DIR, DB_CONFIG_FILE).writeText(config.toString())
-    }
-
-    data class Result(val success: Boolean, val message: String)
-}
