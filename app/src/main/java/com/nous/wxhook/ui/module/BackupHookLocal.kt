@@ -251,6 +251,7 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA kdf_iter = 4000;' " +
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
+                "-cmd 'SELECT * FROM message;' " +
                 "2>/dev/null | gzip -c > $gzFile 2>/dev/null\n" +
                 "chmod 644 $gzFile 2>/dev/null\n" +
                 "rm -f $tmpDir/wxhook_dec.db 2>/dev/null\n" +
