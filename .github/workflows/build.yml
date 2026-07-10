@@ -51,9 +51,21 @@ jobs:
         with:
           name: wxhook-debug
           path: app/build/outputs/apk/debug/app-debug.apk
-      
+
       - name: Upload Xposed APK
         uses: actions/upload-artifact@v4
         with:
           name: wxhook-xposed-debug
           path: xposed/build/outputs/apk/debug/xposed-debug.apk
+
+      - name: Publish to Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: nightly
+          name: "wxhook nightly build"
+          artifacts: "app/build/outputs/apk/debug/app-debug.apk,xposed/build/outputs/apk/debug/xposed-debug.apk"
+          allowUpdates: true
+          replacesArtifacts: true
+          makeLatest: true
+          removeArtifacts: true
+          body: "自动构建 ${{ github.run_number }} - ${{ github.sha }}"
