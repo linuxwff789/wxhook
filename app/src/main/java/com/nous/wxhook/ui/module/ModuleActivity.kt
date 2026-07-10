@@ -133,6 +133,33 @@ class ModuleActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(12), dp(4), dp(12), dp(8)) }
         }
         remoteCard.addView(syncBtn)
+
+        // Rclone config editor
+        val rcloneCfgDir = File(filesDir, ".config/rclone")
+        rcloneCfgDir.mkdirs()
+        val rcloneCfgFile = File(rcloneCfgDir, "rclone.conf")
+        val cfgLabel = TextView(this).apply {
+            text = "rclone 配置 (rclone.conf)"; textSize = 13f; typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(12), dp(8), dp(12), dp(4))
+        }
+        remoteCard.addView(cfgLabel)
+        val rcloneCfgInput = EditText(this).apply {
+            setText(if (rcloneCfgFile.exists()) rcloneCfgFile.readText() else "# 在此粘贴 rclone.conf\n# 格式:\n# [remote_name]\n# type = drive\n# scope = drive\n# token = {...}")
+            textSize = 10f; typeface = Typeface.MONOSPACE
+            minLines = 8; gravity = Gravity.START
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setBackgroundColor(0xFFF0F0F0.toInt())
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(12), dp(4), dp(12), dp(8)) }
+        }
+        remoteCard.addView(rcloneCfgInput)
+        val saveCfgBtn = Button(this).apply {
+            text = "保存配置"; textSize = 12f
+            setOnClickListener {
+                runCatching { rcloneCfgFile.writeText(rcloneCfgInput.text.toString()); log("✅ rclone 配置已保存") }
+            }
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(12), dp(4), dp(12), dp(8)) }
+        }
+        remoteCard.addView(saveCfgBtn)
         root.addView(remoteCard)
 
         // ── Backup card ──
@@ -371,7 +398,10 @@ class ModuleActivity : AppCompatActivity() {
             val remote = runCatching { JSONObject(java.io.File("/sdcard/Download/wxhook_backup/remote_config.json").readText()).optString("remote", "gdrive:wxhook-backup") }.getOrDefault("gdrive:wxhook-backup") ?: "gdrive:wxhook-backup"
             try {
                 log("☁️ 同步到 $remote...")
-                val proc = Runtime.getRuntime().exec(arrayOf(com.nous.wxhook.ui.module.BackupHookLocal.binPath + "/rclone", "sync", "/sdcard/Download/wxhook_backup", remote, "--update"))
+                val configPath = File(filesDir, ".config/rclone/rclone.conf")
+                val rcloneArgs = mutableListOf(com.nous.wxhook.ui.module.BackupHookLocal.binPath + "/rclone", "sync", "/sdcard/Download/wxhook_backup", remote, "--update")
+                if (configPath.exists()) { rcloneArgs.add("--config"); rcloneArgs.add(configPath.absolutePath) }
+                val proc = Runtime.getRuntime().exec(rcloneArgs.toTypedArray())
                 proc.waitFor()
                 handler.post { log("☁️ 同步完成") }
             } catch (e: Exception) {

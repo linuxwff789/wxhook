@@ -26,7 +26,9 @@ object BackupHookLocal {
 
     fun init(ctx: android.content.Context) {
         binDir = ctx.filesDir.absolutePath + "/bin"
+        rcloneConfigPath = ctx.filesDir.absolutePath + "/.config/rclone/rclone.conf"
     }
+    private var rcloneConfigPath = ""
 
     interface ProgressCallback {
         fun onProgress(current: String, fileCount: Long, totalSize: Long)
@@ -200,7 +202,11 @@ object BackupHookLocal {
             val remote = config.optString("remote", "")
             if (remote.isBlank()) return
             callback?.onProgress("同步到 $remote...", 0, 0)
-            val proc = Runtime.getRuntime().exec(arrayOf(binDir + "/rclone", "sync", BACKUP_DIR, remote, "--update"))
+            val args = mutableListOf(binDir + "/rclone", "sync", BACKUP_DIR, remote, "--update")
+            if (rcloneConfigPath.isNotEmpty() && java.io.File(rcloneConfigPath).exists()) {
+                args.add("--config"); args.add(rcloneConfigPath)
+            }
+            val proc = Runtime.getRuntime().exec(args.toTypedArray())
             proc.waitFor()
         } catch (_: Exception) {}
     }
