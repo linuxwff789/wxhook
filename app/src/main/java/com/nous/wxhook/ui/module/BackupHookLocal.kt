@@ -157,7 +157,6 @@ object BackupHookLocal {
                         updateDbState(userDir, tag, lastRowId.toString())
                     }
                 }
-                }
             }
 
             // 2. Attachments incremental (only newer files)
