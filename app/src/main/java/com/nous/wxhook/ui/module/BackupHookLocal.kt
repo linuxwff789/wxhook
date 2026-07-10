@@ -178,7 +178,8 @@ object BackupHookLocal {
 
     private fun gitAddAndCommit(tag: String) {
         try {
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "cd $BACKUP_DIR && git add -A && git commit -m 'backup: $tag' --allow-empty")).waitFor()
+            val git = "/data/data/com.termux/files/usr/bin/git"
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "cd $BACKUP_DIR && " + git + " add -A && " + git + " commit -m 'backup: $tag' --allow-empty")).waitFor()
         } catch (_: Exception) {}
     }
 
