@@ -25,7 +25,7 @@ object BackupHookLocal {
     val binPath: String get() = binDir
 
     fun init(ctx: android.content.Context) {
-        binDir = ctx.filesDir.absolutePath + "/bin"
+        binDir = "/data/local/tmp/wxhook_bin"
         rcloneConfigPath = ctx.filesDir.absolutePath + "/.config/rclone/rclone.conf"
     }
     private var rcloneConfigPath = ""

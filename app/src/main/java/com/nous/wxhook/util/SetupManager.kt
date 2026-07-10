@@ -18,7 +18,7 @@ object SetupManager {
         val marker = File(dir, ".setup_done")
         if (marker.exists()) return
         executor.submit {
-            var ok = true
+            // Extract from APK assets to filesDir/bin (cache)
             for (name in BINS) {
                 try {
                     val dst = File(dir, name)
@@ -26,15 +26,21 @@ object SetupManager {
                     ctx.assets.open("bin/$name").use { i ->
                         FileOutputStream(dst).use { o -> i.copyTo(o, 65536) }
                     }
-                    if (name in EXEC) dst.setExecutable(true, false)
                     dst.setReadable(true, false)
                     android.util.Log.i("wxhook:Setup", "extracted $name (${dst.length()})")
                 } catch (e: Exception) {
                     android.util.Log.e("wxhook:Setup", "failed $name: $e")
-                    ok = false
                 }
             }
-            if (ok) marker.writeText("ok")
+            // Copy to /data/local/tmp/wxhook_bin/ (where SELinux allows execution)
+            val tmpDir = "/data/local/tmp/wxhook_bin"
+            try {
+                Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $tmpDir && cp " + dir.absolutePath + "/* $tmpDir/ && chmod 755 $tmpDir/*")).waitFor()
+                marker.writeText("ok")
+                android.util.Log.i("wxhook:Setup", "copied to $tmpDir")
+            } catch (e: Exception) {
+                android.util.Log.e("wxhook:Setup", "copy to tmp failed: $e")
+            }
         }
     }
 
