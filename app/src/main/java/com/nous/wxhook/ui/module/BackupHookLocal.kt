@@ -199,48 +199,52 @@ object BackupHookLocal {
     // ── DB incremental backup ──
 
     private fun decryptAndDump(dbPath: String): String {
-        // Use /sdcard/Download/EnMicroMsg.db (already exists, avoids cp 2.4GB)
-        val srcDb = if (java.io.File("/sdcard/Download/EnMicroMsg.db").exists()) "/sdcard/Download/EnMicroMsg.db" else dbPath
+        // Copy DB to sdcard tmp (sqlcipher cannot open /proc/PID/root/), then decrypt
+        val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
+        val tmpDb = "$tmpDir/wxhook_dec.db"
+        val outFile = "$tmpDir/wxhook_dec_out.sql"
         return try {
-            val outFile = "/data/local/tmp/wxhook_dec_out.sql"
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "echo "SELECT * FROM message;" > /data/local/tmp/wxhook_dec_query.sql 2>/dev/null")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $tmpDir && cp \"" + dbPath + "\" $tmpDb && chmod 644 $tmpDb 2>/dev/null")).waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "echo \"SELECT * FROM message;\" > $tmpDir/wxhook_dec_query.sql 2>/dev/null")).waitFor()
             val cmd = "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
-                "/data/local/sqlcipher '$srcDb' " +
+                "/data/local/sqlcipher $tmpDb " +
                 "-cmd 'PRAGMA key = \"e9cd2ae\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
                 "-cmd 'PRAGMA kdf_iter = 4000;' " +
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
-                "< /data/local/tmp/wxhook_dec_query.sql 2>/dev/null > $outFile"
+                "< $tmpDir/wxhook_dec_query.sql 2>/dev/null > $outFile"
             Runtime.getRuntime().exec(arrayOf("su", "-c", cmd)).waitFor(180, java.util.concurrent.TimeUnit.SECONDS)
             val readProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $outFile 2>/dev/null"))
             val output = readProc.inputStream.bufferedReader().readText()
             readProc.waitFor()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f /data/local/tmp/wxhook_dec_query.sql $outFile 2>/dev/null")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -rf $tmpDb $outFile $tmpDir/wxhook_dec_query.sql 2>/dev/null")).waitFor()
             output
         } catch (_: Exception) { "" }
     }
 
     private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
-        val srcDb = if (java.io.File("/sdcard/Download/EnMicroMsg.db").exists()) "/sdcard/Download/EnMicroMsg.db" else dbPath
+        val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
+        val tmpDb = "$tmpDir/wxhook_inc.db"
+        val outFile = "$tmpDir/wxhook_inc_out.sql"
         return try {
-            val outFile = "/data/local/tmp/wxhook_inc_out.sql"
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "echo \"SELECT * FROM message WHERE rowid > $lastRowId;\" > /data/local/tmp/wxhook_inc_query.sql 2>/dev/null")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $tmpDir && cp \"" + dbPath + "\" $tmpDb && chmod 644 $tmpDb 2>/dev/null")).waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "echo \"SELECT * FROM message WHERE rowid > $lastRowId;\" > $tmpDir/wxhook_inc_query.sql 2>/dev/null")).waitFor()
             val cmd = "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
-                "/data/local/sqlcipher '$srcDb' " +
+                "/data/local/sqlcipher $tmpDb " +
                 "-cmd 'PRAGMA key = \"e9cd2ae\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
                 "-cmd 'PRAGMA kdf_iter = 4000;' " +
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
-                "< /data/local/tmp/wxhook_inc_query.sql 2>/dev/null > $outFile"
-            Runtime.getRuntime().exec(arrayOf("su", "-c", cmd)).waitFor(120, java.util.concurrent.TimeUnit.SECONDS)
+                "< $tmpDir/wxhook_inc_query.sql 2>/dev/null > $outFile"
+            Runtime.getRuntime().exec(arrayOf("su", "-c", cmd)).waitFor(180, java.util.concurrent.TimeUnit.SECONDS)
             val readProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $outFile 2>/dev/null"))
             val output = readProc.inputStream.bufferedReader().readText()
             readProc.waitFor()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f /data/local/tmp/wxhook_inc_query.sql $outFile 2>/dev/null")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -rf $tmpDb $outFile $tmpDir/wxhook_inc_query.sql 2>/dev/null")).waitFor()
             output
         } catch (_: Exception) { "" }
     }
