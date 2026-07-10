@@ -22,6 +22,7 @@ object BackupHookLocal {
     private const val RCLONE_REMOTE = "gdrive:wxhook-backup"
     private const val BACKUP_DIR = "/sdcard/Download/wxhook_backup"
     private var binDir = "/data/data/com.termux/files/usr/bin"
+    val binPath: String get() = binDir
 
     fun init(ctx: android.content.Context) {
         binDir = ctx.filesDir.absolutePath + "/bin"

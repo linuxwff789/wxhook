@@ -371,7 +371,7 @@ class ModuleActivity : AppCompatActivity() {
             val remote = runCatching { JSONObject(java.io.File("/sdcard/Download/wxhook_backup/remote_config.json").readText()).optString("remote", "gdrive:wxhook-backup") }.getOrDefault("gdrive:wxhook-backup") ?: "gdrive:wxhook-backup"
             try {
                 log("☁️ 同步到 $remote...")
-                val proc = Runtime.getRuntime().exec(arrayOf("rclone", "sync", "/sdcard/Download/wxhook_backup", remote, "--update"))
+                val proc = Runtime.getRuntime().exec(arrayOf(com.nous.wxhook.ui.module.BackupHookLocal.binPath + "/rclone", "sync", "/sdcard/Download/wxhook_backup", remote, "--update"))
                 proc.waitFor()
                 handler.post { log("☁️ 同步完成") }
             } catch (e: Exception) {
