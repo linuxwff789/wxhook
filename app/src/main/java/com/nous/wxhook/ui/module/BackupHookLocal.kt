@@ -198,7 +198,7 @@ object BackupHookLocal {
             val remote = config.optString("remote", "")
             if (remote.isBlank()) return
             callback?.onProgress("同步到 $remote...", 0, 0)
-            val proc = Runtime.getRuntime().exec(arrayOf("rclone", "sync", BACKUP_DIR, remote, "--update"))
+            val proc = Runtime.getRuntime().exec(arrayOf(binDir + "/rclone", "sync", BACKUP_DIR, remote, "--update"))
             proc.waitFor()
         } catch (_: Exception) {}
     }

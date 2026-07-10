@@ -34,6 +34,8 @@ class ModuleActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.nous.wxhook.util.SetupManager.setup(this)
+        com.nous.wxhook.ui.module.BackupHookLocal.init(this)
 
         val sv = ScrollView(this)
         val root = LinearLayout(this).apply {
