@@ -150,11 +150,15 @@ object BackupHookLocal {
                     val gzPath = incResult.substring(3)
                     val gzFile = java.io.File(gzPath)
                     if (gzFile.exists()) {
-                        val incrFile = File(userDir, "incr_${lastRowId}_to_${lastRowId}.sql.gz")
+                        // Extract last rowid from gz file (read only last line)
+                        val lastRowIdNew = runCatching {
+                            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "gzip -dc " + gzFile.absolutePath + " 2>/dev/null | tail -1 | grep -oP 'VALUES\\(\\K\\d+'"))
+                            proc.inputStream.bufferedReader().readText().trim().toLong()
+                        }.getOrDefault(lastRowId)
+                        val incrFile = File(userDir, "incr_${lastRowId}_to_${lastRowIdNew}.sql.gz")
                         gzFile.renameTo(incrFile)
                         totalFiles++; totalSize += incrFile.length(); newFiles++
-                        // Update DB state (use lastRowId as the new rowid - caller will update later)
-                        updateDbState(userDir, tag, lastRowId.toString())
+                        updateDbState(userDir, tag, lastRowIdNew.toString())
                     }
                 }
             }
