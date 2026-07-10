@@ -130,6 +130,8 @@ object BackupHookLocal {
             val wxPaths = findWxPaths()
             if (wxPaths.isEmpty()) return Result(false, "微信未运行或未找到数据")
 
+            var incrFrom = 0L
+            var incrTo = 0L
             // 1. DB incremental
             for (wxBasePath in wxPaths) {
                 val userHash = wxBasePath.substringAfterLast("/")
@@ -146,19 +148,22 @@ object BackupHookLocal {
                 callback?.onProgress("[$userHash] DB增量...", totalFiles, totalSize)
                 val dbSrc = "$wxBasePath/EnMicroMsg.db"
                 val incResult = decryptIncremental(dbSrc, lastRowId)
+                incrFrom = lastRowId
+                incrTo = lastRowId
                 if (incResult.startsWith("OK:")) {
                     val gzPath = incResult.substring(3)
                     val gzFile = java.io.File(gzPath)
                     if (gzFile.exists()) {
                         // Extract last rowid from gz file (read only last line)
-                        val lastRowIdNew = runCatching {
+                        incrTo = runCatching {
                             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "gzip -dc " + gzFile.absolutePath + " 2>/dev/null | tail -1 | grep -oP 'VALUES\\(\\K\\d+'"))
                             proc.inputStream.bufferedReader().readText().trim().toLong()
                         }.getOrDefault(lastRowId)
-                        val incrFile = File(userDir, "incr_${lastRowId}_to_${lastRowIdNew}.sql.gz")
+                        val incrFile = File(userDir, "incr_${incrFrom}_to_${incrTo}.sql.gz")
                         gzFile.renameTo(incrFile)
                         totalFiles++; totalSize += incrFile.length(); newFiles++
-                        updateDbState(userDir, tag, lastRowIdNew.toString())
+                        updateDbState(userDir, tag, incrTo.toString())
+                        callback?.onProgress("[$userHash] DB增量: ${incrTo - incrFrom}条新消息", totalFiles, totalSize)
                     }
                 }
             }
@@ -202,10 +207,12 @@ object BackupHookLocal {
             for (f in incList) {
                 incrFiles.add(f.name)
             }
-            val rec = createRecord(tag, "incremental", totalFiles, totalSize, if (newFiles > 0) "增量: ${newFiles}个新文件" else "无新文件")
+            val rec = createRecord(tag, "incremental", totalFiles, totalSize, 
+                if (newFiles > 0) "增量: ${newFiles}个文件, ${formatSize(totalSize)}" else "无新文件")
             if (incrFiles.isNotEmpty()) rec.put("files", JSONArray(incrFiles))
+            rec.put("newFiles", newFiles)
             addRecord(rec)
-            val msg = if (newFiles > 0) "增量备份: ${newFiles}个新文件, ${formatSize(totalSize)}" else "无新文件"
+            val msg = if (newFiles > 0) "增量备份: ${newFiles}个文件(${formatSize(totalSize)}), DB:${incrFrom}→${incrTo}" else "无新文件"
             Result(true, msg)
         } catch (e: Exception) { Result(false, "增量备份失败: ${e.message}") }
     }
