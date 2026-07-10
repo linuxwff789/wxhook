@@ -184,7 +184,8 @@ object BackupHookLocal {
     private fun gitAddAndCommit(tag: String) {
         try {
             val g = binDir + "/git"
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "HOME=/data/local/tmp cd $BACKUP_DIR && " + g + " add -A && " + g + " commit -m 'backup: $tag' --allow-empty")).waitFor()
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "HOME=/data/local/tmp " + g + " -C " + BACKUP_DIR + " add -A && " + g + " -C " + BACKUP_DIR + " commit -m 'backup: $tag' --allow-empty"))
+            proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)  // 30s timeout (FUSE is slow)
         } catch (_: Exception) {}
     }
 
