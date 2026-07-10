@@ -191,7 +191,7 @@ object BackupHookLocal {
             saveState(tag, totalFiles, totalSize)
             val incrFiles = mutableListOf<String>()
             val incList = dir.listFiles()?.filter { it.name.startsWith("incr_") && it.name.endsWith(".gz") }?.sortedBy { it.name } ?: emptyList()
-            for (f in incList {
+            for (f in incList) {
                 incrFiles.add(f.name)
             }
             val rec = createRecord(tag, "incremental", totalFiles, totalSize, if (newFiles > 0) "增量: ${newFiles}个新文件" else "无新文件")
