@@ -55,12 +55,12 @@ object BackupHookLocal {
                     val gzFile = java.io.File(gzPath)
                     if (gzFile.exists()) {
                         gzFile.renameTo(dbGzFile)
-                        totalFiles++; totalSize += gzFile.length()
+                        totalFiles++; totalSize += dbGzFile.length()
                     }
                 }
                 if (!dbGzFile.exists()) {
                     compressFileSu(dbSrc, dbGzFile.absolutePath)
-                    if (dbGzFile.exists()) { totalFiles++; totalSize += gzFile.length() }
+                    if (dbGzFile.exists()) { totalFiles++; totalSize += dbGzFile.length() }
                 }
 
                 // Save DB state
