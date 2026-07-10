@@ -349,20 +349,16 @@ object BackupHookLocal {
     private fun findWxPaths(): List<String> {
         val paths = mutableListOf<String>()
         try {
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
-            val pid = proc.inputStream.bufferedReader().readText().trim()
-            proc.waitFor()
-            if (pid.isNotEmpty()) {
-                val basePath = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg"
-                val lsProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $basePath 2>/dev/null"))
-                val dirs = lsProc.inputStream.bufferedReader().readLines().filter { it.isNotBlank() }
-                lsProc.waitFor()
-                for (d in dirs) {
-                    val check = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $basePath/$d/EnMicroMsg.db 2>/dev/null"))
-                    val out = check.inputStream.bufferedReader().readText().trim()
-                    check.waitFor()
-                    if (out.isNotEmpty()) paths.add("$basePath/$d")
-                }
+            // Use direct /data/data/ path (accessible via su, no PID needed)
+            val basePath = "/data/data/com.tencent.mm/MicroMsg"
+            val lsProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $basePath 2>/dev/null"))
+            val dirs = lsProc.inputStream.bufferedReader().readLines().filter { it.isNotBlank() }
+            lsProc.waitFor()
+            for (d in dirs) {
+                val check = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $basePath/$d/EnMicroMsg.db 2>/dev/null"))
+                val out = check.inputStream.bufferedReader().readText().trim()
+                check.waitFor()
+                if (out.isNotEmpty()) paths.add("$basePath/$d")
             }
         } catch (_: Exception) {}
         return paths
