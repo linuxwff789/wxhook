@@ -143,7 +143,11 @@ object BackupHookLocal {
                 val dbSrc = "$wxBasePath/EnMicroMsg.db"
                 val incrSql = decryptIncremental(dbSrc, lastRowId)
                 if (incrSql.isNotEmpty() && incrSql.contains("INSERT INTO message")) {
-                    val incrFile = File(userDir, "incr_$tag.sql.gz")
+                    val lastRowIdNew = runCatching {
+                        val line = incrSql.lines().lastOrNull { it.contains("INSERT INTO ") }
+                        line?.substringAfter("VALUES(")?.substringBefore(",")?.toLongOrNull() ?: 0L
+                    }.getOrDefault(0L)
+                    val incrFile = File(userDir, "incr_${lastRowId}_to_${lastRowIdNew}.sql.gz")
                     incrFile.writeBytes(compressGzip(incrSql.toByteArray()))
                     totalFiles++; totalSize += incrFile.length(); newFiles++
                     // Update DB state
