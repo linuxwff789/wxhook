@@ -54,7 +54,7 @@ object BackupHookLocal {
 
                 callback?.onProgress("[$userHash] 数据库基线...", totalFiles, totalSize)
                 val dbSrc = "$wxBasePath/EnMicroMsg.db"
-                val dbGzFile = File(userDir, "EnMicroMsg_baseline.sql.zst")
+                val dbGzFile = File(userDir, "EnMicroMsg_baseline.sql.gz")
                 // Decrypt + gzip (fixed printf '%s' + /data/local/tmp/ script)
                 val decResult = decryptAndDump(dbSrc)
                 if (decResult.startsWith("OK:")) {
@@ -147,7 +147,7 @@ object BackupHookLocal {
                         val line = incrSql.lines().lastOrNull { it.contains("INSERT INTO ") }
                         line?.substringAfter("VALUES(")?.substringBefore(",")?.toLongOrNull() ?: 0L
                     }.getOrDefault(0L)
-                    val incrFile = File(userDir, "incr_${lastRowId}_to_${lastRowIdNew}.sql.zst")
+                    val incrFile = File(userDir, "incr_${lastRowId}_to_${lastRowIdNew}.sql.gz")
                     incrFile.writeBytes(compressGzip(incrSql.toByteArray()))
                     totalFiles++; totalSize += incrFile.length(); newFiles++
                     // Update DB state
@@ -271,7 +271,7 @@ object BackupHookLocal {
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
         val shPath = "/data/local/tmp/decrypt_full.sh"
         val doneFile = "$tmpDir/decrypt_full_done.txt"
-        val gzFile = "$tmpDir/EnMicroMsg_baseline.sql.zst"
+        val gzFile = "$tmpDir/EnMicroMsg_baseline.sql.gz"
         return try {
             val pwd = getDbPassword()
             val script = ("#!/system/bin/sh\n" +
@@ -286,7 +286,7 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message;' " +
-                "2>/dev/null | ${binDir}/zstd -c -19 > $gzFile 2>/dev/null\n" +
+                "2>/dev/null | gzip -c > $gzFile 2>/dev/null\n" +
                 "chmod 644 $gzFile 2>/dev/null\n" +
                 "rm -f $tmpDir/wxhook_dec.db 2>/dev/null\n" +
                 "date > " + doneFile + "\n" +  // write start time instead of "done"
@@ -381,7 +381,7 @@ object BackupHookLocal {
 
     private fun compressFileSu(srcPath: String, dstPath: String) {
         try {
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "${binDir}/zstd -c -19 \" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\" &")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "gzip -c \"" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\" &")).waitFor()
         } catch (_: Exception) {}
     }
 
