@@ -244,7 +244,7 @@ object BackupHookLocal {
                 "echo done > $doneFile\n")
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
             Runtime.getRuntime().exec(arrayOf("su", "-c", "echo " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "setsid $shPath > /dev/null 2>&1 &")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '$shPath > /dev/null 2>&1' &")).waitFor()
             var waited = 0; val maxWait = 300
             while (waited < maxWait) {
                 Thread.sleep(1000); waited++
@@ -280,7 +280,7 @@ object BackupHookLocal {
                 "echo done > $doneFile\n")
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
             Runtime.getRuntime().exec(arrayOf("su", "-c", "echo " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "setsid $shPath > /dev/null 2>&1 &")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '$shPath > /dev/null 2>&1' &")).waitFor()
             var waited = 0; val maxWait = 300
             while (waited < maxWait) {
                 Thread.sleep(1000); waited++
