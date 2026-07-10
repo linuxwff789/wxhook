@@ -7,7 +7,7 @@ import java.util.concurrent.Executors
 
 object SetupManager {
 
-    private val BINS = listOf("git", "rclone", "sqlcipher",
+    private val BINS = listOf("git", "rclone", "zstd", "sqlcipher",
         "libz.so.1", "libcrypto.so.3", "libedit.so", "libncursesw.so.6")
     private val EXEC = listOf("git", "rclone", "sqlcipher")
     private val executor = Executors.newSingleThreadExecutor()
