@@ -71,7 +71,16 @@ object BackupHookLocal {
                 }
 
                 // Save DB state
-                saveDbState(userDir, tag)
+                val maxRowId = runCatching<Long> {
+                    val p = Runtime.getRuntime().exec(arrayOf("su", "-c", 
+                        "LD_PRELOAD='/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6' " +
+                        "/data/local/sqlcipher /sdcard/Download/wxhook_backup/tmp/wxhook_dec.db " +
+                        "-cmd 'PRAGMA key = \"e9cd2ae\";' -cmd 'PRAGMA cipher_compatibility=3;' -cmd 'PRAGMA cipher_page_size=1024;' -cmd 'PRAGMA kdf_iter=4000;' -cmd 'PRAGMA cipher_use_hmac=OFF;' " +
+                        "-cmd 'SELECT max(rowid) FROM message;' 2>/dev/null"))
+                    p.waitFor()
+                    p.inputStream.bufferedReader().readLines().lastOrNull { it.all { it.isDigit() } }?.toLong() ?: 0L
+                }.getOrDefault(0L)
+                saveDbState(userDir, tag, maxRowId)
             }
 
             // 3. Backup attachments (git will handle dedup)
@@ -332,8 +341,8 @@ object BackupHookLocal {
         return bos.toByteArray()
     }
 
-    private fun saveDbState(userDir: File, tag: String) {
-        val state = JSONObject().apply { put("lastBackupTag", tag); put("lastBackupTime", System.currentTimeMillis()) }
+    private fun saveDbState(userDir: File, tag: String, maxRowId: Long = 0) {
+        val state = JSONObject().apply { put("lastBackupTag", tag); put("lastBackupTime", System.currentTimeMillis()); if (maxRowId > 0) put("lastMessageRowId", maxRowId) }
         File(userDir, DB_STATE_FILE).writeText(state.toString())
     }
 
@@ -347,9 +356,13 @@ object BackupHookLocal {
         state.put("lastBackupTag", tag)
         state.put("lastBackupTime", System.currentTimeMillis())
         state.put("incrCount", state.optInt("incrCount", 0) + 1)
-        // Try to extract last rowid from INSERT statements
-        val lastInsert = incrSql.lines().lastOrNull { it.contains("INSERT INTO message") }
-        // Save state
+        // Extract last rowid from INSERT statements
+        val lastLine = incrSql.lines().lastOrNull { it.contains("INSERT INTO ") }
+        if (lastLine != null) {
+            val v = lastLine.substringAfter("VALUES(").substringBefore(",")
+            val rowId = v.toLongOrNull()
+            if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
+        }
         File(userDir, DB_STATE_FILE).writeText(state.toString())
     }
 
