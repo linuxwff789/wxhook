@@ -156,7 +156,8 @@ object BackupHookLocal {
                     if (gzFile.exists()) {
                         // Extract last rowid from gz file (read only last line)
                         incrTo = runCatching {
-                            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "gzip -dc " + gzFile.absolutePath + " 2>/dev/null | tail -1 | grep -oP 'VALUES\\(\\K\\d+'"))
+                            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
+                                "gzip -dc " + gzFile.absolutePath + " 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
                             proc.inputStream.bufferedReader().readText().trim().toLong()
                         }.getOrDefault(lastRowId)
                         val incrFile = File(userDir, "incr_${incrFrom}_to_${incrTo}.sql.gz")
