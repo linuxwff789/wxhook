@@ -147,7 +147,7 @@ object BackupHookLocal {
                         val line = incrSql.lines().lastOrNull { it.contains("INSERT INTO ") }
                         line?.substringAfter("VALUES(")?.substringBefore(",")?.toLongOrNull() ?: 0L
                     }.getOrDefault(0L)
-                    val incrFile = File(userDir, "incr_${lastRowId}_to_${lastRowIdNew}.sql.gz")
+                    val incrFile = File(userDir, "incr_${lastRowId}_to_${lastRowIdNew}.sql.zst")
                     incrFile.writeBytes(compressGzip(incrSql.toByteArray()))
                     totalFiles++; totalSize += incrFile.length(); newFiles++
                     // Update DB state
@@ -271,7 +271,7 @@ object BackupHookLocal {
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
         val shPath = "/data/local/tmp/decrypt_full.sh"
         val doneFile = "$tmpDir/decrypt_full_done.txt"
-        val gzFile = "$tmpDir/EnMicroMsg_baseline.sql.gz"
+        val gzFile = "$tmpDir/EnMicroMsg_baseline.sql.zst"
         return try {
             val pwd = getDbPassword()
             val script = ("#!/system/bin/sh\n" +
