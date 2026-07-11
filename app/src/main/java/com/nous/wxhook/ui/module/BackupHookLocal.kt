@@ -585,7 +585,9 @@ object BackupHookLocal {
             results.add("${userDir.name}: rowId=${state.optLong("lastMessageRowId", 0)} incr=${incrFiles.size} git=${state.optString("gitCommit", "-")}")
         }
         val sorted = (0 until rebuiltRecords.length()).map { rebuiltRecords.getJSONObject(it) }.sortedBy { it.optLong("time", 0L) }
-        File(BACKUP_DIR, RECORDS_FILE).writeText(JSONArray(sorted).toString())
+        val outArr = JSONArray()
+        for (rec in sorted) outArr.put(rec)
+        File(BACKUP_DIR, RECORDS_FILE).writeText(outArr.toString())
         return results.joinToString("\n") + "\nrecords=" + sorted.size
     }
 
