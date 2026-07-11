@@ -522,25 +522,25 @@ object BackupHookLocal {
         for (userDir in userDirs) {
             val state = loadDbState(userDir)
             state.put("restoredAt", System.currentTimeMillis())
-            val baseline = userDir.listFiles()?.find { it.name.startsWith("EnMicroMsg_baseline") && it.name.endsWith(ext()) }
+            val baseline = userDir.listFiles()?.find { it.name.startsWith("EnMicroMsg_baseline") && (it.name.endsWith(".sql.gz") || it.name.endsWith(".sql.zst")) }
             if (baseline != null) {
                 state.put("baseline", baseline.name)
                 state.put("baselineSize", baseline.length())
                 state.put("lastBackupTime", baseline.lastModified())
             }
-            val incrFiles = userDir.listFiles()?.filter { it.name.startsWith("incr_") && it.name.endsWith(ext()) }?.sortedBy { it.name } ?: emptyList()
+            val incrFiles = userDir.listFiles()?.filter { it.name.startsWith("incr_") && (it.name.endsWith(".sql.gz") || it.name.endsWith(".sql.zst")) }?.sortedBy { it.name } ?: emptyList()
             if (incrFiles.isNotEmpty()) {
                 state.put("incrCount", incrFiles.size)
                 state.put("incrFiles", JSONArray(incrFiles.map { it.name }))
                 val lastFile = incrFiles.last()
-                val dec = if (useZstd()) binDir + "/zstd -dc" else "gzip -dc"
+                val dec = if (lastFile.name.endsWith(".zst")) binDir + "/zstd -dc" else "gzip -dc"
                 try {
                     val p = Runtime.getRuntime().exec(arrayOf("su", "-c", dec + " " + lastFile.absolutePath + " 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
                     val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
                     if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
                 } catch (_: Exception) {}
             } else if (baseline != null) {
-                val dec = if (useZstd()) binDir + "/zstd -dc" else "gzip -dc"
+                val dec = if (baseline.name.endsWith(".zst")) binDir + "/zstd -dc" else "gzip -dc"
                 try {
                     val p = Runtime.getRuntime().exec(arrayOf("su", "-c", dec + " " + baseline.absolutePath + " 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
                     val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
