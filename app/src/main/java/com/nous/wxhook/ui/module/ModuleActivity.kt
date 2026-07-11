@@ -35,8 +35,20 @@ class ModuleActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        com.nous.wxhook.util.SetupManager.setup(this)
-        com.nous.wxhook.ui.module.BackupHookLocal.init(this)
+        try {
+            android.util.Log.e("wxhook:TEST", "1-setup starting")
+            com.nous.wxhook.util.SetupManager.setup(this)
+            android.util.Log.e("wxhook:TEST", "2-setup done")
+        } catch(e: Exception) {
+            android.util.Log.e("wxhook:TEST", "setup failed: " + e)
+        }
+        try {
+            android.util.Log.e("wxhook:TEST", "3-init starting")
+            com.nous.wxhook.ui.module.BackupHookLocal.init(this)
+            android.util.Log.e("wxhook:TEST", "4-init done")
+        } catch(e: Exception) {
+            android.util.Log.e("wxhook:TEST", "init failed: " + e)
+        }
 
         val sv = ScrollView(this)
         val root = LinearLayout(this).apply {
@@ -213,8 +225,13 @@ class ModuleActivity : AppCompatActivity() {
         // Load records
         Thread { try { val records = BackupManager.getRecords(); val sb = StringBuilder(); records.take(10).forEach { r -> val time = BackupManager.formatTime(r.time); val size = BackupManager.formatSize(r.totalSize); val type = if (r.type == "full") "全量" else "增量"; sb.appendLine("[$time] $type | $size | ${r.fileCount}文件"); sb.appendLine("  ${r.message}") }; handler.post { logView.text = sb.toString() } } catch (e: Exception) { handler.post { logView.text = "记录加载失败" } } }.start()
 
-        sv.addView(root)
-        setContentView(sv)
+        try {
+            sv.addView(root)
+            setContentView(sv)
+            android.util.Log.e("wxhook:TEST", "5-layout done")
+        } catch(e: Exception) {
+            android.util.Log.e("wxhook:TEST", "layout failed: " + e)
+        }
     }
 
     private fun doBackup(incremental: Boolean, compress: Boolean = true) {
