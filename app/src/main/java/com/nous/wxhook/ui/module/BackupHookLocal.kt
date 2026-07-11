@@ -519,6 +519,7 @@ object BackupHookLocal {
         val userDirs = dir.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") && !it.name.startsWith("tmp") } ?: emptyList()
         if (userDirs.isEmpty()) return "备份目录为空"
         val results = mutableListOf<String>()
+        val rebuiltRecords = JSONArray()
         for (userDir in userDirs) {
             val state = loadDbState(userDir)
             state.put("restoredAt", System.currentTimeMillis())
@@ -527,6 +528,16 @@ object BackupHookLocal {
                 state.put("baseline", baseline.name)
                 state.put("baselineSize", baseline.length())
                 state.put("lastBackupTime", baseline.lastModified())
+                rebuiltRecords.put(JSONObject().apply {
+                    put("tag", SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date(baseline.lastModified())))
+                    put("type", "full")
+                    put("time", baseline.lastModified())
+                    put("fileCount", 1)
+                    put("totalSize", baseline.length())
+                    put("compression", if (baseline.name.endsWith(".zst")) "zstd" else "gzip")
+                    put("message", "全量备份: ${baseline.name}")
+                    put("files", JSONArray().put(baseline.name))
+                })
             }
             val incrFiles = userDir.listFiles()?.filter { it.name.startsWith("incr_") && (it.name.endsWith(".sql.gz") || it.name.endsWith(".sql.zst")) }?.sortedBy { it.name } ?: emptyList()
             if (incrFiles.isNotEmpty()) {
@@ -539,6 +550,24 @@ object BackupHookLocal {
                     val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
                     if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
                 } catch (_: Exception) {}
+                for (f in incrFiles) {
+                    val m = Regex("incr_(\\d+)_to_(\\d+)\\.sql\\.(gz|zst)").find(f.name)
+                    val from = m?.groupValues?.getOrNull(1)?.toLongOrNull() ?: 0L
+                    val to = m?.groupValues?.getOrNull(2)?.toLongOrNull() ?: 0L
+                    rebuiltRecords.put(JSONObject().apply {
+                        put("tag", SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date(f.lastModified())))
+                        put("type", "incremental")
+                        put("time", f.lastModified())
+                        put("fileCount", 1)
+                        put("totalSize", f.length())
+                        put("compression", if (f.name.endsWith(".zst")) "zstd" else "gzip")
+                        put("newFiles", 1)
+                        put("incrFrom", from)
+                        put("incrTo", to)
+                        put("message", "增量备份: DB:${from}→${to}")
+                        put("files", JSONArray().put(f.name))
+                    })
+                }
             } else if (baseline != null) {
                 val dec = if (baseline.name.endsWith(".zst")) binDir + "/zstd -dc" else "gzip -dc"
                 try {
@@ -555,7 +584,9 @@ object BackupHookLocal {
             File(userDir, DB_STATE_FILE).writeText(state.toString())
             results.add("${userDir.name}: rowId=${state.optLong("lastMessageRowId", 0)} incr=${incrFiles.size} git=${state.optString("gitCommit", "-")}")
         }
-        return results.joinToString("\n")
+        val sorted = (0 until rebuiltRecords.length()).map { rebuiltRecords.getJSONObject(it) }.sortedBy { it.optLong("time", 0L) }
+        File(BACKUP_DIR, RECORDS_FILE).writeText(JSONArray(sorted).toString())
+        return results.joinToString("\n") + "\nrecords=" + sorted.size
     }
 
     data class Result(val success: Boolean, val message: String)
