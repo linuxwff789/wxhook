@@ -37,6 +37,7 @@ object BackupHookLocal {
     private val ATT_DIRS = listOf("image2", "voice2", "video", "emoji", "avatar", "cdn", "record", "favorite")
 
     fun doFullBackup(callback: ProgressCallback? = null): Result {
+        val startTime = System.currentTimeMillis()
         return try {
             val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val dir = File(BACKUP_DIR); if (!dir.exists()) dir.mkdirs()
@@ -137,6 +138,7 @@ object BackupHookLocal {
     }
 
     fun doIncrementalBackup(callback: ProgressCallback? = null): Result {
+        val startTime = System.currentTimeMillis()
         return try {
             val state = loadState()
             val lastTime = state.optLong("lastBackupTime", 0L)
