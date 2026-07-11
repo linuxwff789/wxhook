@@ -22,13 +22,16 @@ object BackupHookLocal {
     private const val RCLONE_REMOTE = "gdrive:wxhook-backup"
     private const val BACKUP_DIR = "/sdcard/Download/wxhook_backup"
     private var binDir = "/data/data/com.termux/files/usr/bin"
+    private var filesDirPath = "/data/local/tmp"
     val binPath: String get() = binDir
 
     fun init(ctx: android.content.Context) {
         binDir = "/data/local/tmp/wxhook_bin"
+        filesDirPath = ctx.filesDir.absolutePath
         rcloneConfigPath = ctx.filesDir.absolutePath + "/.config/rclone/rclone.conf"
     }
     private var rcloneConfigPath = ""
+    private fun filesDirForWrite() = File(filesDirPath).apply { mkdirs() }
 
     interface ProgressCallback {
         fun onProgress(current: String, fileCount: Long, totalSize: Long)
@@ -581,13 +584,17 @@ object BackupHookLocal {
                 val hash = p.inputStream.bufferedReader().readText().trim().take(12)
                 if (hash.isNotEmpty() && hash != "HEAD") state.put("gitCommit", hash)
             } catch (_: Exception) {}
-            File(userDir, DB_STATE_FILE).writeText(state.toString())
+            val tmpState = File(filesDirForWrite(), "db_state_${userDir.name}.json")
+            tmpState.writeText(state.toString())
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmpState.absolutePath}\" \"${File(userDir, DB_STATE_FILE).absolutePath}\" && chmod 664 \"${File(userDir, DB_STATE_FILE).absolutePath}\"")).waitFor()
             results.add("${userDir.name}: rowId=${state.optLong("lastMessageRowId", 0)} incr=${incrFiles.size} git=${state.optString("gitCommit", "-")}")
         }
         val sorted = (0 until rebuiltRecords.length()).map { rebuiltRecords.getJSONObject(it) }.sortedBy { it.optLong("time", 0L) }
         val outArr = JSONArray()
         for (rec in sorted) outArr.put(rec)
-        File(BACKUP_DIR, RECORDS_FILE).writeText(outArr.toString())
+        val tmpRecords = File(filesDirForWrite(), RECORDS_FILE)
+        tmpRecords.writeText(outArr.toString())
+        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmpRecords.absolutePath}\" \"${File(BACKUP_DIR, RECORDS_FILE).absolutePath}\" && chmod 664 \"${File(BACKUP_DIR, RECORDS_FILE).absolutePath}\"")).waitFor()
         return results.joinToString("\n") + "\nrecords=" + sorted.size
     }
 
