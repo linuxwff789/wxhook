@@ -110,10 +110,11 @@ class SettingsActivity : AppCompatActivity() {
             action == "sync_now" -> doSync()
             action == "rebuild_state" -> {
                 Thread {
-                    val result = com.nous.wxhook.ui.module.BackupHookLocal.rebuildDbState()
+                    val result = runCatching { com.nous.wxhook.ui.module.BackupHookLocal.rebuildDbState() }
+                        .getOrElse { "重建失败: ${it.message}" }
                     runOnUiThread {
-                        supportActionBar?.title = "设置"
-                        android.widget.Toast.makeText(this@SettingsActivity, "✅ $result", android.widget.Toast.LENGTH_LONG).show()
+                        supportActionBar?.title = "设置 ✅ 重建完成"
+                        android.widget.Toast.makeText(this@SettingsActivity, if (result.startsWith("重建失败")) result else "✅ 重建完成", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }.start()
             }
