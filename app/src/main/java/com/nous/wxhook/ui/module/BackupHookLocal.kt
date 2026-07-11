@@ -149,6 +149,7 @@ object BackupHookLocal {
                 val dbSrc = "$wxBasePath/EnMicroMsg.db"
                 val incResult = decryptIncremental(dbSrc, lastRowId)
                 incrFrom = lastRowId
+                incrFrom = lastRowId
                 incrTo = lastRowId
                 if (incResult.startsWith("OK:")) {
                     val gzPath = incResult.substring(3)
@@ -262,6 +263,8 @@ object BackupHookLocal {
         } catch (_: Exception) {}
         return false
     }
+
+    private fun useZstd() = false  // simplified, gzip always
 
     private fun getDbPassword(): String {
         if (cachedPassword != null) return cachedPassword!!
