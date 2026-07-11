@@ -17,5 +17,8 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
       
-      - name: Just echo
-        run: echo "JDK works"
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Test gradlew
+        run: ./gradlew --version
