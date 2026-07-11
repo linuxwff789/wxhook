@@ -39,4 +39,3 @@ PRAGMA cipher_page_size = 1024;
 PRAGMA kdf_iter = 4000;
 PRAGMA cipher_use_hmac = OFF;
 ```
-

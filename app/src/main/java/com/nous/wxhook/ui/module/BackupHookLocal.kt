@@ -149,7 +149,6 @@ object BackupHookLocal {
                 val dbSrc = "$wxBasePath/EnMicroMsg.db"
                 val incResult = decryptIncremental(dbSrc, lastRowId)
                 incrFrom = lastRowId
-                incrFrom = lastRowId
                 incrTo = lastRowId
                 if (incResult.startsWith("OK:")) {
                     val gzPath = incResult.substring(3)
@@ -157,9 +156,8 @@ object BackupHookLocal {
                     if (gzFile.exists()) {
                         // Extract last rowid from gz file (read only last line)
                         incrTo = runCatching {
-                            val dec = if (useZstd()) binDir + "/zstd -dc" else "gzip -dc"
                             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
-                                "$dec " + gzFile.absolutePath + " 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
+                                "gzip -dc " + gzFile.absolutePath + " 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
                             proc.inputStream.bufferedReader().readText().trim().toLong()
                         }.getOrDefault(lastRowId)
                         val incrFile = File(userDir, "incr_${incrFrom}_to_${incrTo}" + ext())
@@ -264,8 +262,6 @@ object BackupHookLocal {
         } catch (_: Exception) {}
         return false
     }
-
-    private fun useZstd() = false  // simplified, gzip always
 
     private fun getDbPassword(): String {
         if (cachedPassword != null) return cachedPassword!!
