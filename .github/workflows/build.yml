@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       
@@ -17,7 +19,65 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
       
-      - name: Build
+      - name: Setup Android SDK
         run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug 2>&1
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
+          yes | sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Setup Go for rclone
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Compile rclone for Android
+        run: |
+          cd /tmp
+          curl -sL https://github.com/rclone/rclone/archive/refs/tags/v1.69.2.tar.gz | tar xz
+          cd rclone-1.69.2
+          GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o rclone-android
+          ls -lh rclone-android
+          cp rclone-android $GITHUB_WORKSPACE/app/src/main/assets/bin/rclone
+
+      - name: Compile zstd for Android
+        run: |
+          cd /tmp
+          curl -sL https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz | tar xz
+          cd zstd-1.5.6
+          export CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+          make zstd-release -j$(nproc)
+          ls -lh programs/zstd
+          cp programs/zstd $GITHUB_WORKSPACE/app/src/main/assets/bin/zstd
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+      
+      - name: Build with Gradle
+        run: ./gradlew assembleDebug
+      
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: wxhook-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload Xposed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: wxhook-xposed-debug
+          path: xposed/build/outputs/apk/debug/xposed-debug.apk
+
+      - name: Publish to Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: nightly
+          name: "wxhook nightly build"
+          artifacts: "app/build/outputs/apk/debug/app-debug.apk,xposed/build/outputs/apk/debug/xposed-debug.apk"
+          allowUpdates: true
+          replacesArtifacts: true
+          makeLatest: true
+          removeArtifacts: true
+          body: "自动构建 ${{ github.run_number }} - ${{ github.sha }}"
