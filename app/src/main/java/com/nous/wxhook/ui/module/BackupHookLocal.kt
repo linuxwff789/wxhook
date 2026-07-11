@@ -156,8 +156,9 @@ object BackupHookLocal {
                     if (gzFile.exists()) {
                         // Extract last rowid from gz file (read only last line)
                         incrTo = runCatching {
+                            val dec = if (useZstd()) "${binDir}/zstd -dc" else "gzip -dc"
                             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
-                                "gzip -dc " + gzFile.absolutePath + " 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
+                                dec + " " + gzFile.absolutePath + " 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
                             proc.inputStream.bufferedReader().readText().trim().toLong()
                         }.getOrDefault(lastRowId)
                         val incrFile = File(userDir, "incr_${incrFrom}_to_${incrTo}" + ext())
@@ -351,7 +352,7 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
-                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -19" else "gzip -c") + " > $outFile.gz\n" +
+                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > $outFile.gz\n" +
                 "date > " + doneFile + "\n")
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
             Runtime.getRuntime().exec(arrayOf("su", "-c", "printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
@@ -402,7 +403,7 @@ object BackupHookLocal {
 
     private fun compressFileSu(srcPath: String, dstPath: String) {
         try {
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "" + (if (useZstd()) "${binDir}/zstd -c -19" else "gzip -c") + " \"" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\" &")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "" + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " \"" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\" &")).waitFor()
         } catch (_: Exception) {}
     }
 
