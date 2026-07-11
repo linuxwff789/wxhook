@@ -120,10 +120,14 @@ object BackupHookLocal {
                     val st = JSONObject(stateFile.readText())
                     st.put("gitCommit", gitHash)
                     stateFile.writeText(st.toString())
-                    val dbStateFile = File(userDir, DB_STATE_FILE)
-                    val dbst = JSONObject(dbStateFile.readText())
-                    dbst.put("gitCommit", gitHash)
-                    dbStateFile.writeText(dbst.toString())
+                    for (d in File(BACKUP_DIR).listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") && !it.name.startsWith("tmp") } ?: emptyList()) {
+                        val dbStateFile = File(d, DB_STATE_FILE)
+                        if (dbStateFile.exists()) {
+                            val dbst = JSONObject(dbStateFile.readText())
+                            dbst.put("gitCommit", gitHash)
+                            dbStateFile.writeText(dbst.toString())
+                        }
+                    }
                 } catch (_: Exception) {}
             }
             addRecord(createRecord(tag, "full", totalFiles, totalSize, "全量备份完成", durationMs = System.currentTimeMillis() - startTime))
@@ -223,10 +227,14 @@ object BackupHookLocal {
                     val st = JSONObject(stateFile.readText())
                     st.put("gitCommit", gitHash)
                     stateFile.writeText(st.toString())
-                    val dbStateFile = File(userDir, DB_STATE_FILE)
-                    val dbst = JSONObject(dbStateFile.readText())
-                    dbst.put("gitCommit", gitHash)
-                    dbStateFile.writeText(dbst.toString())
+                    for (d in File(BACKUP_DIR).listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") && !it.name.startsWith("tmp") } ?: emptyList()) {
+                        val dbStateFile = File(d, DB_STATE_FILE)
+                        if (dbStateFile.exists()) {
+                            val dbst = JSONObject(dbStateFile.readText())
+                            dbst.put("gitCommit", gitHash)
+                            dbStateFile.writeText(dbst.toString())
+                        }
+                    }
                 } catch (_: Exception) {}
             }
             val incrFiles = mutableListOf<String>()
