@@ -91,6 +91,8 @@ class SettingsActivity : AppCompatActivity() {
         items.add(SettingsItem.Input("备份路径", "backup_path", "/sdcard/Download/wxhook_backup"))
         items.add(SettingsItem.Toggle("压缩附件", "compress", false))
         items.add(SettingsItem.Toggle("zstd压缩(更快更小)", "zstd", false))
+        items.add(SettingsItem.Header("🛠 工具"))
+        items.add(SettingsItem.Button("重建备份状态", "rebuild_state"))
 
         recyclerView.adapter = SettingsAdapter(items, recyclerView) { action, data ->
             handleAction(action, data, cfg)
@@ -106,6 +108,15 @@ class SettingsActivity : AppCompatActivity() {
                 runOnUiThread { supportActionBar?.title = "设置 ✅ 配置已保存" }
             }
             action == "sync_now" -> doSync()
+            action == "rebuild_state" -> {
+                Thread {
+                    val result = com.nous.wxhook.ui.module.BackupHookLocal.rebuildDbState()
+                    runOnUiThread {
+                        supportActionBar?.title = "设置"
+                        android.widget.Toast.makeText(this@SettingsActivity, "✅ $result", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }.start()
+            }
             action.startsWith("rclone_create::") -> {
                 val argsStr = action.removePrefix("rclone_create::")
                 val parts = argsStr.split(" ")

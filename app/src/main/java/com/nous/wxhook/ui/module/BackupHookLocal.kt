@@ -513,6 +513,51 @@ object BackupHookLocal {
         File(BACKUP_DIR, DB_CONFIG_FILE).writeText(config.toString())
     }
 
+    fun rebuildDbState(): String {
+        val dir = File(BACKUP_DIR)
+        val g = binDir + "/git"
+        val userDirs = dir.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") && !it.name.startsWith("tmp") } ?: emptyList()
+        if (userDirs.isEmpty()) return "备份目录为空"
+        val results = mutableListOf<String>()
+        for (userDir in userDirs) {
+            val state = loadDbState(userDir)
+            state.put("restoredAt", System.currentTimeMillis())
+            val baseline = userDir.listFiles()?.find { it.name.startsWith("EnMicroMsg_baseline") && it.name.endsWith(ext()) }
+            if (baseline != null) {
+                state.put("baseline", baseline.name)
+                state.put("baselineSize", baseline.length())
+                state.put("lastBackupTime", baseline.lastModified())
+            }
+            val incrFiles = userDir.listFiles()?.filter { it.name.startsWith("incr_") && it.name.endsWith(ext()) }?.sortedBy { it.name } ?: emptyList()
+            if (incrFiles.isNotEmpty()) {
+                state.put("incrCount", incrFiles.size)
+                state.put("incrFiles", JSONArray(incrFiles.map { it.name }))
+                val lastFile = incrFiles.last()
+                val dec = if (useZstd()) binDir + "/zstd -dc" else "gzip -dc"
+                try {
+                    val p = Runtime.getRuntime().exec(arrayOf("su", "-c", dec + " " + lastFile.absolutePath + " 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
+                    val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
+                    if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
+                } catch (_: Exception) {}
+            } else if (baseline != null) {
+                val dec = if (useZstd()) binDir + "/zstd -dc" else "gzip -dc"
+                try {
+                    val p = Runtime.getRuntime().exec(arrayOf("su", "-c", dec + " " + baseline.absolutePath + " 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
+                    val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
+                    if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
+                } catch (_: Exception) {}
+            }
+            try {
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "HOME=/data/local/tmp LD_LIBRARY_PATH=" + binDir + " " + g + " -C " + BACKUP_DIR + " rev-parse HEAD"))
+                val hash = p.inputStream.bufferedReader().readText().trim().take(12)
+                if (hash.isNotEmpty() && hash != "HEAD") state.put("gitCommit", hash)
+            } catch (_: Exception) {}
+            File(userDir, DB_STATE_FILE).writeText(state.toString())
+            results.add("${userDir.name}: rowId=${state.optLong("lastMessageRowId", 0)} incr=${incrFiles.size} git=${state.optString("gitCommit", "-")}")
+        }
+        return results.joinToString("\n")
+    }
+
     data class Result(val success: Boolean, val message: String)
 
 }
