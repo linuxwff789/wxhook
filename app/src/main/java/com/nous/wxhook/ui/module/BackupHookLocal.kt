@@ -108,14 +108,27 @@ object BackupHookLocal {
             }
 
             // 4. Git commit
-            gitAddAndCommit(tag)
+            val gitHash = gitAddAndCommit(tag)
             rcloneSync(callback)
 
             // 5. Save config and records
             saveDbConfig()
             saveState(tag, totalFiles, totalSize)
-            addRecord(createRecord(tag, "full", totalFiles, totalSize, "全量备份完成"))
-            Result(true, "全量备份完成: ${totalFiles}个文件, ${formatSize(totalSize)}")
+            if (gitHash.isNotEmpty()) {
+                try {
+                    val stateFile = File(BACKUP_DIR, STATE_FILE)
+                    val st = JSONObject(stateFile.readText())
+                    st.put("gitCommit", gitHash)
+                    stateFile.writeText(st.toString())
+                    val dbStateFile = File(userDir, DB_STATE_FILE)
+                    val dbst = JSONObject(dbStateFile.readText())
+                    dbst.put("gitCommit", gitHash)
+                    dbStateFile.writeText(dbst.toString())
+                } catch (_: Exception) {}
+            }
+            addRecord(createRecord(tag, "full", totalFiles, totalSize, "全量备份完成", durationMs = System.currentTimeMillis() - startTime))
+            val gitMsg = if (gitHash.isNotEmpty()) " git:$gitHash" else " (git无commit)"
+            Result(true, "全量备份完成: ${totalFiles}个文件, ${formatSize(totalSize)}$gitMsg")
         } catch (e: Exception) { Result(false, "备份失败: ${e.message}") }
     }
 
@@ -200,33 +213,51 @@ object BackupHookLocal {
             }
 
             // 3. Git commit
-            gitAddAndCommit(tag)
+            val gitHash = gitAddAndCommit(tag)
             rcloneSync(callback)
 
             saveState(tag, totalFiles, totalSize)
+            if (gitHash.isNotEmpty()) {
+                try {
+                    val stateFile = File(BACKUP_DIR, STATE_FILE)
+                    val st = JSONObject(stateFile.readText())
+                    st.put("gitCommit", gitHash)
+                    stateFile.writeText(st.toString())
+                    val dbStateFile = File(userDir, DB_STATE_FILE)
+                    val dbst = JSONObject(dbStateFile.readText())
+                    dbst.put("gitCommit", gitHash)
+                    dbStateFile.writeText(dbst.toString())
+                } catch (_: Exception) {}
+            }
             val incrFiles = mutableListOf<String>()
             val incList = dir.listFiles()?.filter { it.name.startsWith("incr_") && it.name.endsWith(ext()) }?.sortedBy { it.name } ?: emptyList()
             for (f in incList) {
                 incrFiles.add(f.name)
             }
             val rec = createRecord(tag, "incremental", totalFiles, totalSize, 
-                if (newFiles > 0) "增量: ${newFiles}个文件, ${formatSize(totalSize)}" else "无新文件")
+                if (newFiles > 0) "增量: ${newFiles}个文件, ${formatSize(totalSize)}" else "无新文件", durationMs = System.currentTimeMillis() - startTime)
             if (incrFiles.isNotEmpty()) rec.put("files", JSONArray(incrFiles))
             rec.put("newFiles", newFiles)
             addRecord(rec)
             val msg = if (newFiles > 0) "增量备份: ${newFiles}个文件(${formatSize(totalSize)}), DB:${incrFrom}→${incrTo}" else "无新文件"
-            Result(true, msg)
+            val gitMsg = if (gitHash.isNotEmpty()) " git:$gitHash" else " (git无commit)"
+            Result(true, msg + gitMsg)
         } catch (e: Exception) { Result(false, "增量备份失败: ${e.message}") }
     }
 
     // ── Git operations ──
 
-    private fun gitAddAndCommit(tag: String) {
+    private fun gitAddAndCommit(tag: String): String {
+        val g = binDir + "/git"
+        val ld = "LD_LIBRARY_PATH=" + binDir
         try {
-            val g = binDir + "/git"
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "HOME=/data/local/tmp " + g + " -C " + BACKUP_DIR + " add -A && " + g + " -C " + BACKUP_DIR + " commit -m 'backup: $tag' --allow-empty"))
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "HOME=/data/local/tmp " + ld + " " + g + " -C " + BACKUP_DIR + " add -A && " + ld + " " + g + " -C " + BACKUP_DIR + " commit -m 'backup: $tag' --allow-empty"))
             proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)  // 30s timeout (FUSE is slow)
         } catch (_: Exception) {}
+        return try {
+            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "HOME=/data/local/tmp " + ld + " " + g + " -C " + BACKUP_DIR + " rev-parse HEAD"))
+            p.inputStream.bufferedReader().readText().trim().take(12)
+        } catch (_: Exception) { "" }
     }
 
     private fun rcloneSync(callback: ProgressCallback?) {
@@ -313,7 +344,7 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message;' " +
-                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -19" else "gzip -c") + " > $gzFile 2>/dev/null\n" +
+                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > $gzFile 2>/dev/null\n" +
                 "chmod 644 $gzFile 2>/dev/null\n" +
                 "rm -f $tmpDir/wxhook_dec.db 2>/dev/null\n" +
                 "date > " + doneFile + "\n" +  // write start time instead of "done"
@@ -438,10 +469,13 @@ object BackupHookLocal {
         }
     }
 
-    private fun createRecord(tag: String, type: String, fileCount: Long, totalSize: Long, message: String): JSONObject {
+    private fun createRecord(tag: String, type: String, fileCount: Long, totalSize: Long, message: String, compression: String = "", durationMs: Long = 0): JSONObject {
+        val comp = if (compression.isNotEmpty()) compression else if (useZstd()) "zstd" else "gzip"
         return JSONObject().apply {
             put("tag", tag); put("type", type); put("time", System.currentTimeMillis())
             put("fileCount", fileCount); put("totalSize", totalSize); put("message", message)
+            put("compression", comp)
+            if (durationMs > 0) put("durationMs", durationMs)
         }
     }
 
