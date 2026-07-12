@@ -388,7 +388,7 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_page_size = 1024;' -cmd 'PRAGMA kdf_iter = 4000;' " +
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' -cmd 'PRAGMA wal_checkpoint(TRUNCATE);' " +
                 "2>/dev/null"
-            Runtime.getRuntime().exec(arrayOf("su", "-c", walCmd)).waitFor(60_000)
+            Runtime.getRuntime().exec(arrayOf("su", "-c", walCmd)).waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
             if (java.io.File(localDb).length() < 1000000) return ""
             val sqlCmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
                 "${binDir}/sqlcipher $localDb " +
