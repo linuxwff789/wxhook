@@ -195,9 +195,8 @@ object BackupHookLocal {
                             suOut(dec + " \"" + gzFile.absolutePath + "\" 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1").trim().toLong()
                         }.getOrDefault(lastRowId)
                         val incrFile = File(userDir, "incr_${incrFrom}_to_${incrTo}" + ext())
-                        suCopy(gzFile, incrFile)
-                        gzFile.delete()
-                        if (incrFile.exists() && incrFile.length() > 0) {
+                        val ok = gzFile.renameTo(incrFile) || runCatching { suCopy(gzFile, incrFile); gzFile.delete(); incrFile.exists() }.getOrDefault(false)
+                        if (ok && incrFile.exists() && incrFile.length() > 0) {
                             totalFiles++; totalSize += incrFile.length(); newFiles++
                             updateDbState(userDir, tag, incrTo.toString())
                             callback?.onProgress("[$userHash] DB增量: ${incrTo - incrFrom}条新消息", totalFiles, totalSize)
@@ -370,14 +369,14 @@ object BackupHookLocal {
         } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptAndDump: $e"); "" }
     }
     private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
-        val tmpDir = "/data/local/tmp"
+        val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
         val localDb = "$tmpDir/wxhook_inc.db"
         val outGz = "$tmpDir/wxhook_inc_out.sql.gz"
         return try {
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
-            // Clean up and dd via direct exec (avoid rootbridge thread issues)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "killall sqlcipher 2>/dev/null; rm -f $localDb $tmpDir/wxhook_inc.db-shm $tmpDir/wxhook_inc.db-wal $outGz")).waitFor()
+            // Clean up and dd via direct exec (dir exists, created by init mkdirs)
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "killall sqlcipher 2>/dev/null; rm -f $localDb $tmpDir/wxhook_inc.db-shm $tmpDir/wxhook_inc.db-wal $outGz 2>/dev/null")).waitFor()
             val ddProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "dd if=\"" + dbPath + "\" of=$localDb bs=4M 2>/dev/null"))
             ddProc.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
             if (java.io.File(localDb).length() < 1000000) return ""
@@ -402,7 +401,7 @@ object BackupHookLocal {
                 "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > \"" + outGz + "\""
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
             proc.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
-            su("rm -f $localDb")
+            su("rm -f $localDb 2>/dev/null")
             if (java.io.File(outGz).exists() && java.io.File(outGz).length() > 0) return "OK:$outGz"
             ""
         } catch (e: Exception) { "" }
