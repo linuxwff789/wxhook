@@ -429,22 +429,19 @@ object BackupHookLocal {
 
     private fun saveDbState(userDir: File, tag: String, maxRowId: Long = 0) {
         val state = JSONObject().apply { put("lastBackupTag", tag); put("lastBackupTime", System.currentTimeMillis()); if (maxRowId > 0) put("lastMessageRowId", maxRowId) }
-        File(userDir, DB_STATE_FILE).writeText(state.toString())
+        val tmp = File(filesDirForWrite(), "db_state_${userDir.name}.json")
+        tmp.writeText(state.toString())
+        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmp.absolutePath}\" \"${File(userDir, DB_STATE_FILE).absolutePath}\" && chmod 644 \"${File(userDir, DB_STATE_FILE).absolutePath}\"")).waitFor()
     }
 
     private fun loadDbState(userDir: File): JSONObject {
         val f = File(userDir, DB_STATE_FILE)
-        return if (f.exists()) {
-            try {
-                val txt = f.readText()
-                android.util.Log.e("wxhook:INCR", "read ${f.absolutePath}: $txt")
-                JSONObject(txt)
-            } catch (e: Exception) {
-                android.util.Log.e("wxhook:INCR", "loadDbState failed: $e")
-                JSONObject()
-            }
-        } else {
-            android.util.Log.e("wxhook:INCR", "db_state missing: ${f.absolutePath}")
+        return try {
+            val txt = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat \"${f.absolutePath}\" 2>/dev/null"))
+                .inputStream.bufferedReader().readText().trim()
+            if (txt.isNotEmpty()) JSONObject(txt) else JSONObject()
+        } catch (e: Exception) {
+            android.util.Log.e("wxhook:INCR", "loadDbState failed: $e")
             JSONObject()
         }
     }
@@ -456,7 +453,9 @@ object BackupHookLocal {
         state.put("incrCount", state.optInt("incrCount", 0) + 1)
         val rowId = newRowId.toLongOrNull()
         if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
-        File(userDir, DB_STATE_FILE).writeText(state.toString())
+        val tmp = File(filesDirForWrite(), "db_state_${userDir.name}.json")
+        tmp.writeText(state.toString())
+        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmp.absolutePath}\" \"${File(userDir, DB_STATE_FILE).absolutePath}\" && chmod 644 \"${File(userDir, DB_STATE_FILE).absolutePath}\"")).waitFor()
     }
 
     // ── Helpers ──
@@ -512,24 +511,36 @@ object BackupHookLocal {
         val dir = File(BACKUP_DIR)
         if (!dir.exists()) dir.mkdirs()
         val f = File(dir, RECORDS_FILE)
-        val arr = try { JSONArray(f.readText()) } catch (_: Exception) { JSONArray() }
+        val arr = try {
+            val txt = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat \"${f.absolutePath}\" 2>/dev/null")).inputStream.bufferedReader().readText().trim()
+            if (txt.isNotEmpty()) JSONArray(txt) else JSONArray()
+        } catch (_: Exception) { JSONArray() }
         arr.put(record); while (arr.length() > 50) arr.remove(0)
-        f.writeText(arr.toString())
+        val tmp = File(filesDirForWrite(), RECORDS_FILE)
+        tmp.writeText(arr.toString())
+        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmp.absolutePath}\" \"${f.absolutePath}\" && chmod 644 \"${f.absolutePath}\"")).waitFor()
     }
 
     private fun saveState(tag: String, count: Long, size: Long) {
         val state = JSONObject().apply { put("lastBackupTime", System.currentTimeMillis()); put("lastBackupTag", tag); put("fileCount", count); put("totalSize", size) }
-        File(BACKUP_DIR, STATE_FILE).writeText(state.toString())
+        val tmp = File(filesDirForWrite(), STATE_FILE)
+        tmp.writeText(state.toString())
+        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmp.absolutePath}\" \"${File(BACKUP_DIR, STATE_FILE).absolutePath}\" && chmod 644 \"${File(BACKUP_DIR, STATE_FILE).absolutePath}\"")).waitFor()
     }
 
     private fun loadState(): JSONObject {
         val f = File(BACKUP_DIR, STATE_FILE)
-        return if (f.exists()) try { JSONObject(f.readText()) } catch (_: Exception) { JSONObject() } else JSONObject()
+        return try {
+            val txt = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat \"${f.absolutePath}\" 2>/dev/null")).inputStream.bufferedReader().readText().trim()
+            if (txt.isNotEmpty()) JSONObject(txt) else JSONObject()
+        } catch (_: Exception) { JSONObject() }
     }
 
     private fun saveDbConfig() {
         val config = JSONObject().apply { put("password", getDbPassword()); put("savedAt", System.currentTimeMillis()) }
-        File(BACKUP_DIR, DB_CONFIG_FILE).writeText(config.toString())
+        val tmp = File(filesDirForWrite(), DB_CONFIG_FILE)
+        tmp.writeText(config.toString())
+        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmp.absolutePath}\" \"${File(BACKUP_DIR, DB_CONFIG_FILE).absolutePath}\" && chmod 644 \"${File(BACKUP_DIR, DB_CONFIG_FILE).absolutePath}\"")).waitFor()
     }
 
     fun rebuildDbState(): String {
