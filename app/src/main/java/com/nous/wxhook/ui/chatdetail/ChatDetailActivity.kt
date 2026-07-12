@@ -26,6 +26,8 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
+private fun su(cmd: String): String = RootCommandRunner.runSuQuiet(cmd)
+
 data class ChatMessage(
     val msgSvrId: Long, val type: Int,
     val content: String?, val createTime: Long,
