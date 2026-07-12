@@ -440,10 +440,10 @@ class ModuleActivity : AppCompatActivity() {
         android.util.Log.i("wxhook:Backup", msg)
         val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         val line = "[$time] $msg"
-        logView.text = "$line\n${logView.text}"
+        handler.post { logView.text = "$line\n${logView.text}" }
         try {
             val tmp = File(filesDir, "backup_live.log")
-            tmp.appendText(line + "\n")
+            tmp.appendText("$line\n")
             RootCommandRunner.runSu("mkdir -p /sdcard/Download/wxhook_backup && cat \"${tmp.absolutePath}\" >> /sdcard/Download/wxhook_backup/backup_live.log && chmod 644 /sdcard/Download/wxhook_backup/backup_live.log")
             tmp.writeText("")
         } catch (_: Exception) {}
