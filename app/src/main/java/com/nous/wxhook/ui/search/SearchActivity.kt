@@ -7,6 +7,7 @@ import android.os.Looper
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.TextView
 import android.util.Log
 import com.nous.wxhook.rootbridge.RootCommandRunner
 import java.io.*

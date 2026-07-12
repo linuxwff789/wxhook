@@ -34,7 +34,7 @@ data class ChatMessage(
 
 class ChatDetailActivity : AppCompatActivity() {
 
-    private fun su(cmd: String): String = RootCommandRunner.runSuQuiet(cmd)
+    internal fun su(cmd: String): String = RootCommandRunner.runSuQuiet(cmd)
 
     /** Look up nickname from rcontact by wxid */
     private val nickCache = ConcurrentHashMap<String, String>()
