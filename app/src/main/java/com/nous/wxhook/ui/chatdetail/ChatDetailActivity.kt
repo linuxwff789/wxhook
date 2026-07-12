@@ -13,6 +13,7 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.nous.wxhook.rootbridge.RootCommandRunner
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -43,8 +44,7 @@ class ChatDetailActivity : AppCompatActivity() {
             try {
                 val f = File(cacheDir, "nn_${wxid.hashCode()}.sql")
                 f.writeText("PRAGMA key='e9cd2ae';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT nickname FROM rcontact WHERE username='$wxid' LIMIT 1;")
-                val p = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$d' < '${f.absolutePath}'"))
-                val l = p.inputStream.bufferedReader().readLines(); p.waitFor(); f.delete()
+                val p = su(""$sc '$d' < '${f.absolutePath}'")
                 l.lastOrNull { it.isNotBlank() && !it.startsWith("ok") }?.trim() ?: wxid
             } catch (_: Exception) { wxid }
         }
@@ -96,8 +96,7 @@ class ChatDetailActivity : AppCompatActivity() {
     override fun onSupportNavigateUp(): Boolean { finish(); return true }
 
     private fun execCmd(cmd: String): String = try {
-        val p = Runtime.getRuntime().exec(arrayOf("su","-c",cmd))
-        p.inputStream.bufferedReader().readText().trim().also { p.waitFor() }
+        val p = su("cmd")
     } catch (_: Exception) { "" }
 
     private val fileCache = ConcurrentHashMap<String, Boolean>()
@@ -139,10 +138,8 @@ class ChatDetailActivity : AppCompatActivity() {
                 val cntFile = File(cacheDir, "cd_cnt_${tag}.sql")
                 cntFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT count(*) FROM message WHERE talker='$talker';")
                 val sc = "LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher"
-                val proc = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$dbPath' < '${sqlFile.absolutePath}'"))
-                val lines = proc.inputStream.bufferedReader().readLines(); proc.waitFor(); sqlFile.delete()
-                val cnt = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$dbPath' < '${cntFile.absolutePath}'"))
-                val cntOut = cnt.inputStream.bufferedReader().readText().trim(); cnt.waitFor(); cntFile.delete()
+                val proc = su(""$sc '$dbPath' < '${sqlFile.absolutePath}'")
+                val cnt = su(""$sc '$dbPath' < '${cntFile.absolutePath}'")
                 val total = cntOut.lines().lastOrNull { it.all { c -> c.isDigit() } }?.toLongOrNull() ?: 0L
                 val msgs = mutableListOf<ChatMessage>()
                 for (line in lines) {
@@ -172,8 +169,7 @@ class ChatDetailActivity : AppCompatActivity() {
                 val safeKw = keyword.replace("'", "''")
                 sqlFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT msgSvrId,type,replace(replace(content,char(10),' '),'|','/'),createTime,isSend,imgPath FROM message WHERE talker='$talker' AND content LIKE '%$safeKw%' ORDER BY createTime DESC LIMIT 200;")
                 val sc = "LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher"
-                val p = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$dbPath' < '${sqlFile.absolutePath}'"))
-                val lines = p.inputStream.bufferedReader().readLines(); p.waitFor(); sqlFile.delete()
+                val p = su(""$sc '$dbPath' < '${sqlFile.absolutePath}'")
                 val msgs = mutableListOf<ChatMessage>()
                 for (line in lines) { val pt = line.split("|"); if (pt.size >= 6 && !pt[0].startsWith("ok")) msgs.add(ChatMessage(pt[0].toLongOrNull()?:0L, pt[1].toIntOrNull()?:0, pt[2], pt[3].toLongOrNull()?:0L, pt[4]=="1", pt.getOrNull(5))) }
                 handler.post { callback(msgs) }
@@ -204,8 +200,7 @@ class MessageAdapter(
         return try {
             val f = File(cacheDir, "nn_${wxid.hashCode()}.sql")
             f.writeText("PRAGMA key='e9cd2ae';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT nickname FROM rcontact WHERE username='$wxid' LIMIT 1;")
-            val p = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$d' < '${f.absolutePath}'"))
-            val l = p.inputStream.bufferedReader().readLines(); p.waitFor(); f.delete()
+            val p = su(""$sc '$d' < '${f.absolutePath}'")
             l.lastOrNull { it.isNotBlank() && !it.startsWith("ok") }?.trim() ?: wxid
         } catch (_: Exception) { wxid }
     }
@@ -441,8 +436,7 @@ class MessageAdapter(
             val sqlFile = File(cacheDir, "fi_${tag}.sql")
             sqlFile.writeText("PRAGMA key='$key';PRAGMA cipher_compatibility=3;PRAGMA cipher_page_size=1024;PRAGMA kdf_iter=4000;PRAGMA cipher_use_hmac=OFF;SELECT fileName,filePath,fileSize,status FROM appattach WHERE msgInfoId=${msg.msgSvrId} LIMIT 1;")
             val sc = "LD_PRELOAD=/data/local/libz.so.1:/data/local/libcrypto.so.3:/data/local/libedit.so:/data/local/libncursesw.so.6 /data/local/sqlcipher"
-            val p = Runtime.getRuntime().exec(arrayOf("su","-c","$sc '$dbPath' < '${sqlFile.absolutePath}'"))
-            val lines = p.inputStream.bufferedReader().readLines(); p.waitFor(); sqlFile.delete()
+            val p = su(""$sc '$dbPath' < '${sqlFile.absolutePath}'")
             val infoLine = lines.lastOrNull { it.isNotBlank() && !it.startsWith("ok") }
             handler.post {
                 if (infoLine != null) {
