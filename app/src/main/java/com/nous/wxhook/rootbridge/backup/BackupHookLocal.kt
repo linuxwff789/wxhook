@@ -75,12 +75,12 @@ object BackupHookLocal {
                     val gzFile = java.io.File(gzPath)
                     if (gzFile.exists()) {
                         gzFile.renameTo(dbGzFile)
-                        totalFiles++; totalSize += gzFile.length()
+                        totalFiles++; totalSize += backupSize(gzPath)
                     }
                 }
-                if (!dbGzFile.exists()) {
+                if (!backupExists(dbGzFile.absolutePath)) {
                     compressFileSu(dbSrc, dbGzFile.absolutePath)
-                    if (dbGzFile.exists()) { totalFiles++; totalSize += dbGzFile.length() }
+                    if (backupExists(dbGzFile.absolutePath)) { totalFiles++; totalSize += backupSize(dbGzFile.absolutePath) }
                 }
 
                 // Save DB state
@@ -130,15 +130,15 @@ object BackupHookLocal {
             if (gitHash.isNotEmpty()) {
                 try {
                     val stateFile = File(BACKUP_DIR, STATE_FILE)
-                    val st = JSONObject(stateFile.readText())
+                    val st = JSONObject(backupRead(stateFile.absolutePath))
                     st.put("gitCommit", gitHash)
-                    stateFile.writeText(st.toString())
+                    backupWrite(stateFile.absolutePath, st.toString())
                     for (d in File(BACKUP_DIR).listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") && !it.name.startsWith("tmp") } ?: emptyList()) {
                         val dbStateFile = File(d, DB_STATE_FILE)
-                        if (dbStateFile.exists()) {
-                            val dbst = JSONObject(dbStateFile.readText())
+                        if (backupExists(dbStateFile.absolutePath)) {
+                            val dbst = JSONObject(backupRead(dbStateFile.absolutePath))
                             dbst.put("gitCommit", gitHash)
-                            dbStateFile.writeText(dbst.toString())
+                            backupWrite(dbStateFile.absolutePath, dbst.toString())
                         }
                     }
                 } catch (_: Exception) {}
@@ -188,7 +188,7 @@ object BackupHookLocal {
                 if (incResult.startsWith("OK:")) {
                     val gzPath = incResult.substring(3)
                     val gzFile = java.io.File(gzPath)
-                    if (gzFile.exists() && gzFile.length() > 0) {
+                    if (backupExists(gzPath) && backupSize(gzPath) > 0) {
                         // Extract last rowid from gz file (read only last line)
                         incrTo = runCatching {
                             val dec = if (useZstd()) "${binDir}/zstd -dc" else "gzip -dc"
@@ -196,8 +196,8 @@ object BackupHookLocal {
                         }.getOrDefault(lastRowId)
                         val incrFile = File(userDir, "incr_${incrFrom}_to_${incrTo}" + ext())
                         val ok = gzFile.renameTo(incrFile) || runCatching { suCopy(gzFile, incrFile); gzFile.delete(); incrFile.exists() }.getOrDefault(false)
-                        if (ok && incrFile.exists() && incrFile.length() > 0) {
-                            totalFiles++; totalSize += incrFile.length(); newFiles++
+                        if (ok && backupExists(incrFile.absolutePath) && backupSize(incrFile.absolutePath) > 0) {
+                            totalFiles++; totalSize += backupSize(incrFile.absolutePath); newFiles++
                             updateDbState(userDir, tag, incrTo.toString())
                             callback?.onProgress("[$userHash] DB增量: ${incrTo - incrFrom}条新消息", totalFiles, totalSize)
                         } else {
@@ -245,15 +245,15 @@ object BackupHookLocal {
             if (gitHash.isNotEmpty()) {
                 try {
                     val stateFile = File(BACKUP_DIR, STATE_FILE)
-                    val st = JSONObject(stateFile.readText())
+                    val st = JSONObject(backupRead(stateFile.absolutePath))
                     st.put("gitCommit", gitHash)
-                    stateFile.writeText(st.toString())
+                    backupWrite(stateFile.absolutePath, st.toString())
                     for (d in File(BACKUP_DIR).listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") && !it.name.startsWith("tmp") } ?: emptyList()) {
                         val dbStateFile = File(d, DB_STATE_FILE)
-                        if (dbStateFile.exists()) {
-                            val dbst = JSONObject(dbStateFile.readText())
+                        if (backupExists(dbStateFile.absolutePath)) {
+                            val dbst = JSONObject(backupRead(dbStateFile.absolutePath))
                             dbst.put("gitCommit", gitHash)
-                            dbStateFile.writeText(dbst.toString())
+                            backupWrite(dbStateFile.absolutePath, dbst.toString())
                         }
                     }
                 } catch (_: Exception) {}
@@ -310,6 +310,16 @@ object BackupHookLocal {
     // ── DB incremental backup ──
 
     private var cachedPassword: String? = null
+
+    private fun backupExists(path: String): Boolean = suOut("test -e \"$path\" && echo 1").trim() == "1"
+    private fun backupSize(path: String): Long = suOut("stat -c %s \"$path\" 2>/dev/null").trim().toLongOrNull() ?: 0L
+    private fun backupRead(path: String): String = suOut("cat \"$path\" 2>/dev/null")
+    private fun backupWrite(path: String, content: String) {
+        val tmp = File(filesDirForWrite(), "sdcard_write_${System.nanoTime()}.tmp")
+        tmp.writeText(content)
+        suCopy(tmp, File(path))
+        tmp.delete()
+    }
 
     private fun ext() = ".sql.gz"
     private fun useZstd() = false
@@ -371,33 +381,55 @@ object BackupHookLocal {
         } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptAndDump: $e"); "" }
     }
     private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
-        val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
-        val localDb = "$tmpDir/wxhook_inc.db"
-        val outGz = "$tmpDir/wxhook_inc_out.sql.gz"
+        val finalDir = "/sdcard/Download/wxhook_backup/tmp"
+        val workDir = "/data/local/tmp/wxhook_backup"
+        val workDb = "$workDir/wxhook_inc.db"
+        val workOut = "$workDir/wxhook_inc_out.sql.gz"
+        val finalOut = "$finalDir/wxhook_inc_out.sql.gz"
         return try {
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
-            // cp from /proc (original method, works reliably)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f $localDb $tmpDir/wxhook_inc.db-shm $tmpDir/wxhook_inc.db-wal $outGz && cp \"" + dbPath + "\" $localDb && chmod 644 $localDb")).waitFor(120, java.util.concurrent.TimeUnit.SECONDS)
-            if (java.io.File(localDb).length() < 1000000) return ""
+            val cleanupWork = "rm -f $workDb $workDb-shm $workDb-wal $workOut 2>/dev/null"
+            val cleanupAll = "$cleanupWork; rm -f $finalOut 2>/dev/null"
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "killall sqlcipher 2>/dev/null; mkdir -p $workDir; $cleanupAll")).waitFor()
+
+            // /proc DB must be copied sequentially to ext4 before SQLCipher opens it.
+            val copy = Runtime.getRuntime().exec(arrayOf("su", "-c", "dd if=\"$dbPath\" of=\"$workDb\" bs=4M status=none"))
+            val copyFinished = copy.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
+            if (!copyFinished || copy.exitValue() != 0) return ""
+            val copiedSize = RootCommandRunner.runSuQuiet("stat -c %s \"$workDb\" 2>/dev/null").trim().toLongOrNull() ?: 0L
+            if (copiedSize < 1_000_000L) return ""
+
             val sqlCmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
-                "${binDir}/sqlcipher $localDb " +
+                "${binDir}/sqlcipher \"$workDb\" " +
                 "-cmd '.output /dev/null' " +
-                "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
+                "-cmd 'PRAGMA key = \"$pwd\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
                 "-cmd 'PRAGMA kdf_iter = 4000;' " +
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.output stdout' " +
                 "-cmd '.mode insert' " +
-                "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
-                "2>/dev/null | gzip -c > \"" + outGz + "\""
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
-            proc.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
-            su("rm -f $localDb 2>/dev/null")
-            if (java.io.File(outGz).exists() && java.io.File(outGz).length() > 0) return "OK:$outGz"
+                "-cmd 'SELECT * FROM message WHERE rowid > $lastRowId;' " +
+                "2>/dev/null | gzip -c > \"$workOut\""
+            val query = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
+            val queryFinished = query.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
+            if (!queryFinished) {
+                query.destroyForcibly()
+                Runtime.getRuntime().exec(arrayOf("su", "-c", "killall sqlcipher 2>/dev/null")).waitFor()
+            }
+            val outputSize = RootCommandRunner.runSuQuiet("stat -c %s \"$workOut\" 2>/dev/null").trim().toLongOrNull() ?: 0L
+            if (!queryFinished || outputSize <= 0L) {
+                Runtime.getRuntime().exec(arrayOf("su", "-c", cleanupWork)).waitFor()
+                return ""
+            }
+            val moved = RootCommandRunner.runSu("cp \"$workOut\" \"$finalOut\" && chmod 664 \"$finalOut\"", 60_000).ok
+            Runtime.getRuntime().exec(arrayOf("su", "-c", cleanupWork)).waitFor()
+            if (moved) "OK:$finalOut" else ""
+        } catch (e: Exception) {
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "killall sqlcipher 2>/dev/null; rm -f $workDb $workDb-shm $workDb-wal $workOut $finalOut 2>/dev/null")).waitFor()
             ""
-        } catch (e: Exception) { "" }
+        }
     }
 
 
@@ -441,7 +473,7 @@ object BackupHookLocal {
 
     private fun compressFileSu(srcPath: String, dstPath: String) {
         try {
-            su("" + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " \"" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\" &")
+            su("" + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " \"" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\"", 600_000)
         } catch (_: Exception) {}
     }
 
