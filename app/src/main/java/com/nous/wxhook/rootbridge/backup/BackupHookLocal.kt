@@ -376,15 +376,14 @@ object BackupHookLocal {
         } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptAndDump: $e"); "" }
     }
         private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
-        val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
-        val outGz = "$tmpDir/wxhook_inc_out.sql.gz"
+        val outGz = "/sdcard/Download/wxhook_backup/tmp/wxhook_inc_out.sql.gz"
         return try {
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
-            // Copy DB from /proc to a temp file on sdcard first
-            su("mkdir -p $tmpDir && cp \"" + dbPath + "\" $tmpDir/wxhook_inc_cp.db 2>/dev/null")
-            val sqlCmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
-                "${binDir}/sqlcipher $tmpDir/wxhook_inc_cp.db " +
+            su("mkdir -p /sdcard/Download/wxhook_backup/tmp")
+            // Use /proc path directly (no DB copy, avoids MIUI watchdog killing us)
+            val cmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
+                "${binDir}/sqlcipher \"" + dbPath + "\" " +
                 "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
@@ -393,10 +392,8 @@ object BackupHookLocal {
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
                 "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > \"" + outGz + "\""
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
             proc.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
-            // Clean up temp DB copy
-            su("rm -f $tmpDir/wxhook_inc_cp.db")
             if (java.io.File(outGz).exists() && java.io.File(outGz).length() > 0) return "OK:$outGz"
             ""
         } catch (e: Exception) { "" }
