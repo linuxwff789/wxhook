@@ -34,14 +34,17 @@ class ModuleActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var isBackingUp = false
     private val backupFinishReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+        override fun onReceive(ctx: android.content.Context?, intent: android.content.Intent?) {
             if (intent?.action == com.nous.wxhook.service.BackupService.ACTION_FINISH) {
                 val ok = intent.getBooleanExtra(com.nous.wxhook.service.BackupService.EXTRA_OK, false)
                 val msg = intent.getStringExtra(com.nous.wxhook.service.BackupService.EXTRA_MSG) ?: ""
-                if (ok) log("✅ $msg") else log("❌ $msg")
-                Thread { try { val records = BackupManager.getRecords(); val sb = StringBuilder(); records.take(10).forEach { r -> val time = BackupManager.formatTime(r.time); val size = BackupManager.formatSize(r.totalSize); val type = if (r.type == "full") "全量" else "增量"; sb.appendLine("[$time] $type | $size | ${r.fileCount}文件"); sb.appendLine("  ${r.message}") }; handler.post { logView.text = sb.toString() } } catch (e: Exception) { handler.post { logView.text = "记录加载失败" } } }.start()
+                log((if (ok) "✅ " else "❌ ") + msg)
                 isBackingUp = false
                 backupBtn.isEnabled = true; incrBtn.isEnabled = true
+                backupBtn.text = "全量备份 (DB + 附件)"; incrBtn.text = "增量备份 (仅新文件)"
+            }
+        }
+    }
                 backupBtn.text = "全量备份 (DB + 附件)"; incrBtn.text = "增量备份 (仅新文件)"
             }
         }
@@ -49,9 +52,19 @@ class ModuleActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        android.util.Log.e("wxhook:startup", "1")
         com.nous.wxhook.util.SetupManager.setup(this)
+        android.util.Log.e("wxhook:startup", "2")
         com.nous.wxhook.rootbridge.backup.BackupHookLocal.init(this)
+        android.util.Log.e("wxhook:startup", "3")
         registerReceiver(backupFinishReceiver, android.content.IntentFilter(com.nous.wxhook.service.BackupService.ACTION_FINISH), RECEIVER_NOT_EXPORTED)
+
+        // Request notification permission on Android 13+
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            try {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
+            } catch (_: Exception) {}
+        }
 
         val sv = ScrollView(this)
         val root = LinearLayout(this).apply {
@@ -257,11 +270,6 @@ class ModuleActivity : AppCompatActivity() {
         Thread {
             log(if (incremental) "已启动前台服务: 增量备份" else "已启动前台服务: 全量备份")
             com.nous.wxhook.service.BackupService.start(this, incremental)
-            handler.post {
-                isBackingUp = false
-                backupBtn.isEnabled = true; incrBtn.isEnabled = true
-                backupBtn.text = "全量备份 (DB + 附件)"; incrBtn.text = "增量备份 (仅新文件)"
-            }
         }.start()
     }
 
