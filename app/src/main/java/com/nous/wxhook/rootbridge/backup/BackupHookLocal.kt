@@ -383,7 +383,9 @@ object BackupHookLocal {
         return try {
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
-            // dd synchronously (no &) to ensure complete copy before sqlcipher
+            // Clean up any stale sqlcipher processes from previous runs
+            su("killall sqlcipher 2>/dev/null; rm -f $localDb $tmpDir/wxhook_inc.db-shm $tmpDir/wxhook_inc.db-wal $outGz")
+            // dd synchronously to ensure complete copy
             su("dd if=\"" + dbPath + "\" of=$localDb bs=4M 2>/dev/null", 300_000)
             if (java.io.File(localDb).length() < 1000000) return ""
             val sqlCmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
