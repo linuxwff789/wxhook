@@ -50,6 +50,10 @@ class BackupService : Service() {
             try {
                 BackupHookLocal.init(this)
                 appendLog("服务启动: " + if (incremental) "增量备份" else "全量备份")
+                updateNotification("前台服务已启动，开始前置检查")
+                val version = runSu("LD_PRELOAD='${BackupHookLocal.binPath}/libz.so.1:${BackupHookLocal.binPath}/libcrypto.so.3:${BackupHookLocal.binPath}/libedit.so:${BackupHookLocal.binPath}/libncursesw.so.6' ${BackupHookLocal.binPath}/sqlcipher -version 2>/dev/null | head -1")
+                appendLog("sqlcipher: " + if (version.isNotBlank()) version else "(empty)")
+                updateNotification("sqlcipher检查完成")
                 val cb = object : BackupHookLocal.ProgressCallback {
                     override fun onProgress(current: String, fileCount: Long, totalSize: Long) {
                         updateNotification(current)
@@ -85,6 +89,15 @@ class BackupService : Service() {
             Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p /sdcard/Download/wxhook_backup && cat \"${tmp.absolutePath}\" >> /sdcard/Download/wxhook_backup/backup_live.log && chmod 644 /sdcard/Download/wxhook_backup/backup_live.log")).waitFor()
             tmp.writeText("")
         } catch (_: Exception) {}
+    }
+
+    private fun runSu(cmd: String): String {
+        return try {
+            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            val out = p.inputStream.bufferedReader().readText().trim()
+            p.waitFor()
+            out
+        } catch (_: Exception) { "" }
     }
 
     private fun createNotification(text: String): Notification {
