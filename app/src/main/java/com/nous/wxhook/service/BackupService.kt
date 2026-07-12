@@ -10,7 +10,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.nous.wxhook.rootbridge.RootCommandRunner
-import com.nous.wxhook.ui.module.BackupHookLocal
+import com.nous.wxhook.rootbridge.backup.BackupHookLocal
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date

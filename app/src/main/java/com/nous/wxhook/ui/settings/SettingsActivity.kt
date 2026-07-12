@@ -17,7 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.nous.wxhook.ui.module.BackupHookLocal
+import com.nous.wxhook.rootbridge.backup.BackupHookLocal
 import java.io.File
 import org.json.JSONObject
 
@@ -110,7 +110,7 @@ class SettingsActivity : AppCompatActivity() {
             action == "sync_now" -> doSync()
             action == "rebuild_state" -> {
                 Thread {
-                    val result = runCatching { com.nous.wxhook.ui.module.BackupHookLocal.rebuildDbState() }
+                    val result = runCatching { com.nous.wxhook.rootbridge.backup.BackupHookLocal.rebuildDbState() }
                         .getOrElse { "重建失败: ${it.message}" }
                     runOnUiThread {
                         supportActionBar?.title = "设置 ✅ 重建完成"

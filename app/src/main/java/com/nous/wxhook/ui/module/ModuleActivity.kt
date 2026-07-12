@@ -50,7 +50,7 @@ class ModuleActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         com.nous.wxhook.util.SetupManager.setup(this)
-        com.nous.wxhook.ui.module.BackupHookLocal.init(this)
+        com.nous.wxhook.rootbridge.backup.BackupHookLocal.init(this)
         registerReceiver(backupFinishReceiver, android.content.IntentFilter(com.nous.wxhook.service.BackupService.ACTION_FINISH), RECEIVER_NOT_EXPORTED)
 
         val sv = ScrollView(this)
@@ -412,7 +412,7 @@ class ModuleActivity : AppCompatActivity() {
             try {
                 log("☁️ 同步到 $remote...")
                 val configPath = File(filesDir, ".config/rclone/rclone.conf")
-                val rcloneArgs = mutableListOf(com.nous.wxhook.ui.module.BackupHookLocal.binPath + "/rclone", "sync", "/sdcard/Download/wxhook_backup", remote, "--update")
+                val rcloneArgs = mutableListOf(com.nous.wxhook.rootbridge.backup.BackupHookLocal.binPath + "/rclone", "sync", "/sdcard/Download/wxhook_backup", remote, "--update")
                 if (configPath.exists()) { rcloneArgs.add("--config"); rcloneArgs.add(configPath.absolutePath) }
                 val proc = Runtime.getRuntime().exec(rcloneArgs.toTypedArray())
                 proc.waitFor()
