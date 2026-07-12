@@ -30,7 +30,7 @@ class MainActivity : AppCompatActivity() {
             "📊 状态检测" to "com.nous.wxhook.ui.status.StatusActivity",
             "💬 聊天列表" to "com.nous.wxhook.ui.chatlist.ChatListActivity",
             "🔍 搜索" to "com.nous.wxhook.ui.search.SearchActivity",
-            "📦 备份管理" to "com.nous.wxhook.ui.backup.BackupActivity",
+            "📦 备份管理" to "com.nous.wxhook.ui.module.ModuleActivity",
             "🔄 模块入口" to "com.nous.wxhook.ui.module.ModuleActivity",
             "🔗 数据合并" to "com.nous.wxhook.ui.merge.MergeActivity",
             "⚙️ 设置" to "com.nous.wxhook.ui.settings.SettingsActivity",
