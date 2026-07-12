@@ -89,8 +89,6 @@ class SettingsActivity : AppCompatActivity() {
         // ── Backup section ──
         items.add(SettingsItem.Header("📂 备份设置"))
         items.add(SettingsItem.Input("备份路径", "backup_path", "/sdcard/Download/wxhook_backup"))
-        items.add(SettingsItem.Toggle("压缩附件", "compress", false))
-        items.add(SettingsItem.Toggle("zstd压缩(更快更小)", "zstd", false))
         items.add(SettingsItem.Header("🛠 工具"))
         items.add(SettingsItem.Button("重建备份状态", "rebuild_state"))
 
