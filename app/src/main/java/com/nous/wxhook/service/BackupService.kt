@@ -87,7 +87,7 @@ class BackupService : Service() {
             val line = "[" + SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()) + "] " + msg
             val tmp = File(filesDir, "backup_live.log")
             tmp.appendText(line + "\n")
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p /sdcard/Download/wxhook_backup && cat \"${tmp.absolutePath}\" >> /sdcard/Download/wxhook_backup/backup_live.log && chmod 644 /sdcard/Download/wxhook_backup/backup_live.log")).waitFor()
+            RootCommandRunner.runSu("mkdir -p /sdcard/Download/wxhook_backup && cat \"${tmp.absolutePath}\" >> /sdcard/Download/wxhook_backup/backup_live.log && chmod 644 /sdcard/Download/wxhook_backup/backup_live.log")
             tmp.writeText("")
         } catch (_: Exception) {}
     }

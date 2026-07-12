@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.nous.wxhook.rootbridge.RootCommandRunner
 import java.io.File
 
 class DecryptService : Service() {
@@ -106,12 +107,7 @@ class DecryptService : Service() {
     }
 
     private fun runSu(cmd: String): String {
-        return try {
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            val output = proc.inputStream.bufferedReader().readText()
-            proc.waitFor()
-            output.trim()
-        } catch (_: Exception) { "" }
+        return RootCommandRunner.runSuQuiet(cmd)
     }
 
     private fun createNotification(text: String): Notification {
