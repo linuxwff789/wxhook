@@ -281,10 +281,19 @@ object BackupHookLocal {
         val g = binDir + "/git"
         val ld = "LD_LIBRARY_PATH=" + binDir
         val env = "HOME=/data/local/tmp " + ld + " " + g + " -C \"" + BACKUP_DIR + "\""
-        RootCommandRunner.runSu("$env init 2>/dev/null")
-        RootCommandRunner.runSu("$env add -A 2>/dev/null")
-        RootCommandRunner.runSu("$env commit -m \"" + tag + "\" --allow-empty 2>/dev/null", 30_000)
-        return RootCommandRunner.runSuQuiet("$env rev-parse HEAD 2>/dev/null").trim().take(12)
+        val init = RootCommandRunner.runSu("$env init", 30_000)
+        if (!init.ok) return ""
+        val identity = RootCommandRunner.runSu(
+            "$env config user.name wxhook && $env config user.email wxhook@localhost",
+            30_000
+        )
+        if (!identity.ok) return ""
+        val add = RootCommandRunner.runSu("$env add -A", 120_000)
+        if (!add.ok) return ""
+        val commit = RootCommandRunner.runSu("$env commit -m \"$tag\" --allow-empty", 120_000)
+        if (!commit.ok) return ""
+        val head = RootCommandRunner.runSu("$env rev-parse --verify HEAD", 30_000)
+        return if (head.ok) head.stdout.trim().take(12) else ""
     }
 
     private fun rcloneSync(callback: ProgressCallback?) {
