@@ -33,26 +33,28 @@ jobs:
         with:
           go-version: '1.23'
 
-      - name: Compile rclone for Android
+      - name: Cache native binaries
+        id: cache-bins
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/bin
+          key: native-bins-v1-20260712
+
+      - name: Compile native binaries
+        if: steps.cache-bins.outputs.cache-hit != 'true'
         run: |
           mkdir -p app/src/main/assets/bin
           cd /tmp
           curl -sL https://github.com/rclone/rclone/archive/refs/tags/v1.69.2.tar.gz | tar xz
           cd rclone-1.69.2
           GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o rclone-android
-          ls -lh rclone-android
           cp rclone-android $GITHUB_WORKSPACE/app/src/main/assets/bin/rclone
-
-      - name: Compile zstd for Android
-        run: |
-          mkdir -p app/src/main/assets/bin
           cd /tmp
           curl -sL https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz | tar xz
           cd zstd-1.5.6
           make zstd-release -j$(nproc) CC="gcc -O2"
           cp programs/zstd $GITHUB_WORKSPACE/app/src/main/assets/bin/zstd
-          chmod +x $GITHUB_WORKSPACE/app/src/main/assets/bin/zstd
-          ls -lh $GITHUB_WORKSPACE/app/src/main/assets/bin/zstd
+          ls -lh app/src/main/assets/bin/
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
