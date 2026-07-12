@@ -1,6 +1,7 @@
 package com.nous.wxhook.db
 
 import android.util.Log
+import com.nous.wxhook.rootbridge.RootCommandRunner
 import java.io.File
 
 /**
@@ -48,8 +49,7 @@ PRAGMA cipher_use_hmac=OFF;
         try {
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
                 "$SQLCIPHER '$dbPath' < '${sqlFile.absolutePath}' 2>/dev/null | tail -1"))
-            val out = proc.inputStream.bufferedReader().readText().trim()
-            proc.waitFor()
+            val out = out.trim()
             return out
         } finally { sqlFile.delete() }
     }
@@ -77,7 +77,7 @@ PRAGMA cipher_use_hmac=OFF;
 
         // Copy base to output
         if (baseDbPath != outputPath) {
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "cp '$baseDbPath' '$outputPath'")).waitFor()
+            RootCommandRunner.runSu("cp '$baseDbPath' '$outputPath'")
         }
 
         // Phase 1: dump overlay as INSERT statements
@@ -92,7 +92,6 @@ SELECT * FROM message;
 """.trimIndent())
             val dumpProc = Runtime.getRuntime().exec(arrayOf("su", "-c",
                 "$SQLCIPHER '$overlayDbPath' < '${dumpSqlFile.absolutePath}' 2>/dev/null "))
-            dumpProc.waitFor()
             dumpSqlFile.delete()
 
             if (!dumpFile.exists() || dumpFile.length() < 10L) {
@@ -119,7 +118,7 @@ SELECT * FROM message;
             val changes = try {
                 val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
                     "$SQLCIPHER '$outputPath' < '${runSqlFile.absolutePath}' 2>/dev/null | tail -1"))
-                val out = proc.inputStream.bufferedReader().readText().trim()
+                val out = out.trim()
                 proc.waitFor()
                 out.toLongOrNull() ?: 0L
             } catch (e: Exception) { 0L }

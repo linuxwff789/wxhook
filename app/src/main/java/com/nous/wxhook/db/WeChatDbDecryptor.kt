@@ -3,6 +3,7 @@ package com.nous.wxhook.db
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.util.Log
+import com.nous.wxhook.rootbridge.RootCommandRunner
 import java.io.File
 
 /** SQLCipher CLI path inside Termux. */
@@ -55,12 +56,7 @@ PRAGMA cipher_use_hmac=OFF;
         return try {
             val sql = prg(key) + query
             val tmp = File("/data/local/tmp/_q_tmp.sql").apply { writeText(sql) }
-            val proc = Runtime.getRuntime().exec(arrayOf(
-                "su", "-c",
-                "$SQLCIPHER '$dbPath' < '${tmp.absolutePath}' 2>/dev/null | tail -1"
-            ))
-            val out = proc.inputStream.bufferedReader().readText().trim()
-            proc.waitFor()
+            val out = RootCommandRunner.runSuQuiet("$SQLCIPHER '$dbPath' < '${tmp.absolutePath}' 2>/dev/null | tail -1").trim()
             tmp.delete()
             out.ifBlank { null }
         } catch (e: Exception) {

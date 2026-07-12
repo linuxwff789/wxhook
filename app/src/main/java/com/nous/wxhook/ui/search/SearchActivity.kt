@@ -7,8 +7,9 @@ import android.os.Looper
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.TextView
-import java.io.File
+import android.util.Log
+import com.nous.wxhook.rootbridge.RootCommandRunner
+import java.io.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -34,10 +35,7 @@ class SearchActivity : Activity() {
         setContentView(scrollView)
     }
 
-    private fun su(cmd: String): String = try {
-        val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-        p.inputStream.bufferedReader().readText().trim().also { p.waitFor() }
-    } catch (_: Exception) { "" }
+    private fun su(cmd: String): String = RootCommandRunner.runSuQuiet(cmd)
 
     private fun performSearch() {
         val keyword = searchText.text.toString().trim()

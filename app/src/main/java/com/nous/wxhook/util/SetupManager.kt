@@ -35,7 +35,7 @@ object SetupManager {
             // Copy to /data/local/tmp/wxhook_bin/ (where SELinux allows execution)
             val tmpDir = "/data/local/tmp/wxhook_bin"
             try {
-                Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $tmpDir && cp " + dir.absolutePath + "/* $tmpDir/ && chmod 755 $tmpDir/*")).waitFor()
+                RootCommandRunner.runSu("mkdir -p $tmpDir && cp " + dir.absolutePath + "/* $tmpDir/ && chmod 755 $tmpDir/*")
                 marker.writeText("ok")
                 android.util.Log.i("wxhook:Setup", "copied to $tmpDir")
             } catch (e: Exception) {
