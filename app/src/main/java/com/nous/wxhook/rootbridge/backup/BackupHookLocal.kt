@@ -380,8 +380,11 @@ object BackupHookLocal {
         val outSql = "$tmpDir/wxhook_inc_out.sql"
         val outGz = "$outSql.gz"
         return try {
+            android.util.Log.e("wxhook:dec", "1")
             val pwd = getDbPassword()
+            android.util.Log.e("wxhook:dec", "2 pwd=${pwd.take(4)}...")
             su("mkdir -p $tmpDir && cp \"" + dbPath + "\" $tmpDir/wxhook_inc.db 2>/dev/null")
+            android.util.Log.e("wxhook:dec", "3 cp done")
             val sqlCmd =
                 "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
                 "${binDir}/sqlcipher $tmpDir/wxhook_inc.db " +
@@ -393,19 +396,24 @@ object BackupHookLocal {
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
                 "2>/dev/null > $outSql"
+            android.util.Log.e("wxhook:dec", "4 exec...")
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
+            android.util.Log.e("wxhook:dec", "5 waitFor...")
             proc.waitFor()
+            android.util.Log.e("wxhook:dec", "6 rc=${proc.exitValue()}")
             val sqlFile = java.io.File(outSql)
+            android.util.Log.e("wxhook:dec", "7 file exists=${sqlFile.exists()} len=${sqlFile.length()}")
             if (!sqlFile.exists() || sqlFile.length() == 0L) return ""
             if (useZstd()) {
                 su("${binDir}/zstd -c -3 \"$outSql\" > \"$outGz\" && chmod 644 \"$outGz\" && rm -f \"$outSql\"")
             } else {
                 su("gzip -c \"$outSql\" > \"$outGz\" && chmod 644 \"$outGz\" && rm -f \"$outSql\"")
             }
+            android.util.Log.e("wxhook:dec", "8 gz done")
             if (java.io.File(outGz).exists() && java.io.File(outGz).length() > 0) return "OK:$outGz"
-            android.util.Log.e("wxhook:Backup", "decryptIncremental output empty")
+            android.util.Log.e("wxhook:dec", "9 output empty")
             ""
-        } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptIncremental: $e"); "" }
+        } catch (e: Exception) { android.util.Log.e("wxhook:dec", "catch: $e"); "" }
     }
 
     private fun compressGzip(data: ByteArray): ByteArray {
