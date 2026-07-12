@@ -1,8 +1,6 @@
 name: Compile Native Binaries
 on:
   workflow_dispatch:
-  push:
-    branches: [ native-binaries ]
 
 permissions:
   contents: write
