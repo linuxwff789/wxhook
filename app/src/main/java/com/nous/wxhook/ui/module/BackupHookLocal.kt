@@ -368,16 +368,9 @@ object BackupHookLocal {
                 "echo done >> " + doneFile + "\n")
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
             Runtime.getRuntime().exec(arrayOf("su", "-c", "printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '$shPath > /data/local/tmp/decrypt_exec.log 2>&1' &")).waitFor()
-            var waited = 0; val maxWait = 300
-            while (waited < maxWait) {
-                Thread.sleep(1000); waited++
-                if (java.io.File(doneFile).exists()) {
-                    java.io.File(doneFile).delete()
-                    if (java.io.File(gzFile).exists()) return "OK:$gzFile"
-                    break
-                }
-            }
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "sh $shPath > /data/local/tmp/decrypt_exec.log 2>&1"))
+            proc.waitFor()
+            if (java.io.File(gzFile).exists() && java.io.File(gzFile).length() > 0) return "OK:$gzFile"
             ""
         } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptAndDump: $e"); "" }
     }
@@ -404,19 +397,11 @@ object BackupHookLocal {
                 "date > " + doneFile + "\n")
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
             Runtime.getRuntime().exec(arrayOf("su", "-c", "printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "sh -c '$shPath > /data/local/tmp/decrypt_exec.log 2>&1' &")).waitFor()
-            var waited = 0; val maxWait = 120
-            while (waited < maxWait) {
-                Thread.sleep(1000); waited++
-                if (java.io.File(doneFile).exists()) {
-                    java.io.File(doneFile).delete()
-                    // Return the gz path instead of the full text
-                    val gzFile = "$outFile.gz"
-                    val gz = java.io.File(gzFile)
-                    if (gz.exists()) return "OK:$gzFile"
-                    break
-                }
-            }
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "sh $shPath > /data/local/tmp/decrypt_exec.log 2>&1"))
+            proc.waitFor()
+            val gzFile = "$outFile.gz"
+            val gz = java.io.File(gzFile)
+            if (gz.exists() && gz.length() > 0) return "OK:$gzFile"
             ""
         } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptIncremental: $e"); "" }
     }
