@@ -395,7 +395,7 @@ object BackupHookLocal {
                 val f = java.io.File(localDb)
                 if (f.exists() && f.length() > 1000000) break
             }
-            stepFile.writeText("dd_done_sz=${java.io.File(localDb).length()}")
+            su("echo dd_ok >> /data/local/tmp/dec_step2.txt")
             if (java.io.File(localDb).length() < 1000000) return ""
             val sqlCmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
                 "${binDir}/sqlcipher $localDb " +
@@ -407,14 +407,14 @@ object BackupHookLocal {
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
                 "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > \"" + outGz + "\""
-            stepFile.writeText("sqlcipher_exec")
+            su("echo exec_sqlcipher >> /data/local/tmp/dec_step2.txt")
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
             proc.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
-            stepFile.writeText("sqlcipher_done_rc=${proc.exitValue()}")
+            su("echo rc_${proc.exitValue()} >> /data/local/tmp/dec_step2.txt")
             su("rm -f $localDb")
             if (java.io.File(outGz).exists() && java.io.File(outGz).length() > 0) return "OK:$outGz"
             ""
-        } catch (e: Exception) { stepFile.writeText("catch=${e.message}"); "" }
+        } catch (e: Exception) { su("echo catch_${e.message} >> /data/local/tmp/dec_step2.txt"); "" }
     }
 
     private fun compressGzip(data: ByteArray): ByteArray {
