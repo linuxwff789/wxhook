@@ -75,8 +75,7 @@
             android:foregroundServiceType="dataSync" />
         <service
             android:name=".service.BackupService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:exported="false" />
         <activity android:name=".ui.viewer.ImageViewerActivity" android:exported="false" />
         <service
             android:name=".ui.module.ModuleTileService"
