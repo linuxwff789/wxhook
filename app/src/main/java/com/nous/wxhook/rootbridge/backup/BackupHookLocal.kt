@@ -21,7 +21,7 @@ object BackupHookLocal {
     private const val DB_CONFIG_FILE = "db_config.json"
     private const val DB_STATE_FILE = "db_state.json"
     private const val RCLONE_REMOTE = "gdrive:wxhook-backup"
-    private var BACKUP_DIR = "/sdcard/Download/wxhook_backup"
+    private const val BACKUP_DIR = "/sdcard/Download/wxhook_backup"
     private var binDir = "/data/data/com.termux/files/usr/bin"
     private var filesDirPath = "/data/local/tmp"
     val binPath: String get() = binDir
@@ -29,7 +29,6 @@ object BackupHookLocal {
     fun init(ctx: android.content.Context) {
         binDir = "/data/local/tmp/wxhook_bin"
         filesDirPath = ctx.filesDir.absolutePath
-        BACKUP_DIR = ctx.getExternalFilesDir(null)?.absolutePath + "/backup" ?: BACKUP_DIR
         rcloneConfigPath = ctx.filesDir.absolutePath + "/.config/rclone/rclone.conf"
         // Fix ownership of backup files (survives reinstall UID changes)
         try {
