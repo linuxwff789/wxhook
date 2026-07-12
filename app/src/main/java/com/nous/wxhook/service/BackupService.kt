@@ -21,6 +21,9 @@ class BackupService : Service() {
         private const val NOTIFICATION_ID = 1002
         private const val ACTION_START = "com.nous.wxhook.BACKUP_START"
         private const val EXTRA_INCREMENTAL = "incremental"
+        const val ACTION_FINISH = "com.nous.wxhook.BACKUP_FINISH"
+        const val EXTRA_OK = "ok"
+        const val EXTRA_MSG = "msg"
 
         fun start(ctx: Context, incremental: Boolean) {
             val i = Intent(ctx, BackupService::class.java).apply {
@@ -56,9 +59,19 @@ class BackupService : Service() {
                 val result = if (incremental) BackupHookLocal.doIncrementalBackup(cb) else BackupHookLocal.doFullBackup(cb)
                 appendLog((if (result.success) "完成: " else "失败: ") + result.message)
                 updateNotification(result.message)
+                sendBroadcast(Intent(ACTION_FINISH).apply {
+                    setPackage(packageName)
+                    putExtra(EXTRA_OK, result.success)
+                    putExtra(EXTRA_MSG, result.message)
+                })
             } catch (e: Exception) {
                 appendLog("服务异常: ${e.message}")
                 updateNotification("服务异常: ${e.message}")
+                sendBroadcast(Intent(ACTION_FINISH).apply {
+                    setPackage(packageName)
+                    putExtra(EXTRA_OK, false)
+                    putExtra(EXTRA_MSG, "服务异常: ${e.message}")
+                })
             }
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ stopSelf() }, 3000)
         }.start()

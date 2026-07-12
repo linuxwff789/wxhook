@@ -32,11 +32,25 @@ class ModuleActivity : AppCompatActivity() {
     private lateinit var pathInput: EditText
     private val handler = Handler(Looper.getMainLooper())
     private var isBackingUp = false
+    private val backupFinishReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            if (intent?.action == com.nous.wxhook.service.BackupService.ACTION_FINISH) {
+                val ok = intent.getBooleanExtra(com.nous.wxhook.service.BackupService.EXTRA_OK, false)
+                val msg = intent.getStringExtra(com.nous.wxhook.service.BackupService.EXTRA_MSG) ?: ""
+                if (ok) log("✅ $msg") else log("❌ $msg")
+                Thread { try { val records = BackupManager.getRecords(); val sb = StringBuilder(); records.take(10).forEach { r -> val time = BackupManager.formatTime(r.time); val size = BackupManager.formatSize(r.totalSize); val type = if (r.type == "full") "全量" else "增量"; sb.appendLine("[$time] $type | $size | ${r.fileCount}文件"); sb.appendLine("  ${r.message}") }; handler.post { logView.text = sb.toString() } } catch (e: Exception) { handler.post { logView.text = "记录加载失败" } } }.start()
+                isBackingUp = false
+                backupBtn.isEnabled = true; incrBtn.isEnabled = true
+                backupBtn.text = "全量备份 (DB + 附件)"; incrBtn.text = "增量备份 (仅新文件)"
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         com.nous.wxhook.util.SetupManager.setup(this)
         com.nous.wxhook.ui.module.BackupHookLocal.init(this)
+        registerReceiver(backupFinishReceiver, android.content.IntentFilter(com.nous.wxhook.service.BackupService.ACTION_FINISH), RECEIVER_NOT_EXPORTED)
 
         val sv = ScrollView(this)
         val root = LinearLayout(this).apply {
@@ -453,4 +467,9 @@ class ModuleActivity : AppCompatActivity() {
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    override fun onDestroy() {
+        runCatching { unregisterReceiver(backupFinishReceiver) }
+        super.onDestroy()
+    }
 }
