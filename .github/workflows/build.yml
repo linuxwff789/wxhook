@@ -28,23 +28,28 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Download pre-built rclone
+      - name: Setup Go for rclone
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Compile rclone for Android
         run: |
           mkdir -p app/src/main/assets/bin
-          # Use linux arm64 build (rclone is pure Go, no C deps)
-          curl -sL "https://github.com/rclone/rclone/releases/download/v1.69.2/rclone-v1.69.2-linux-arm64.zip" -o /tmp/rclone.zip
-          unzip -j /tmp/rclone.zip "*/rclone" -d app/src/main/assets/bin/
-          chmod +x app/src/main/assets/bin/rclone
-          ls -lh app/src/main/assets/bin/rclone
-
-      - name: Download pre-built zstd
-        run: |
-          # zstd 1.5.6 - compile from source (small, fast, no deps)
           cd /tmp
-          curl -sL "https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz" -o zstd.tar.gz
-          tar xzf zstd.tar.gz
+          curl -sL https://github.com/rclone/rclone/archive/refs/tags/v1.69.2.tar.gz | tar xz
+          cd rclone-1.69.2
+          GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o rclone-android
+          ls -lh rclone-android
+          cp rclone-android $GITHUB_WORKSPACE/app/src/main/assets/bin/rclone
+
+      - name: Compile zstd for Android
+        run: |
+          mkdir -p app/src/main/assets/bin
+          cd /tmp
+          curl -sL https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz | tar xz
           cd zstd-1.5.6
-          make zstd-release -j$(nproc) CC="gcc -O2" 2>/dev/null || CC="cc -O2" make zstd-release -j$(nproc)
+          make zstd-release -j$(nproc) CC="gcc -O2"
           cp programs/zstd $GITHUB_WORKSPACE/app/src/main/assets/bin/zstd
           chmod +x $GITHUB_WORKSPACE/app/src/main/assets/bin/zstd
           ls -lh $GITHUB_WORKSPACE/app/src/main/assets/bin/zstd
