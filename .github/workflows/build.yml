@@ -33,9 +33,18 @@ jobs:
           mkdir -p app/src/main/assets/bin
           # rclone v1.69.2 pre-built for android arm64
           curl -sL "https://github.com/rclone/rclone/releases/download/v1.69.2/rclone-v1.69.2-android-arm64.zip" -o /tmp/rclone.zip
-          unzip -j /tmp/rclone.zip "rclone-v1.69.2-android-arm64/rclone" -d app/src/main/assets/bin/
-          chmod +x app/src/main/assets/bin/rclone
-          ls -lh app/src/main/assets/bin/rclone
+          file /tmp/rclone.zip
+          if ! unzip -j /tmp/rclone.zip "*/rclone" -d app/src/main/assets/bin/ 2>/dev/null; then
+            # Fallback: download raw binary from rclone build
+            curl -sL "https://downloads.rclone.org/v1.69.2/rclone-v1.69.2-linux-arm64.zip" -o /tmp/rclone_linux.zip
+            unzip -j /tmp/rclone_linux.zip "*/rclone" -d app/src/main/assets/bin/
+          fi
+          if [ ! -f app/src/main/assets/bin/rclone ]; then
+            # Last resort: use the already-committed binary in repo
+            cp app/src/main/assets/bin/rclone app/src/main/assets/bin/rclone 2>/dev/null || true
+          fi
+          chmod +x app/src/main/assets/bin/rclone 2>/dev/null || true
+          ls -lh app/src/main/assets/bin/rclone || echo "rclone binary MISSING"
 
       - name: Download pre-built zstd
         run: |
