@@ -663,8 +663,7 @@ object BackupHookLocal {
                     try {
                         val p = Runtime.getRuntime().exec(arrayOf("su", "-c", dec + " \"" + baseline.absolutePath + "\" 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
                         val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
-                        if (rowId != null && rowId > previousRowId) state.put("lastMessageRowId", rowId)
-                        else if (previousRowId > 0) state.put("lastMessageRowId", previousRowId)
+                        if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
                     } catch (_: Exception) {}
                 }
                 try {
