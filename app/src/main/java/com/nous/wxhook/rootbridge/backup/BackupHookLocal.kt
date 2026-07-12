@@ -377,13 +377,14 @@ object BackupHookLocal {
     }
         private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
-        val outSql = "$tmpDir/wxhook_inc_out.sql"
+        val outGz = "$tmpDir/wxhook_inc_out.sql.gz"
         return try {
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
-            su("mkdir -p $tmpDir")
+            // Copy DB from /proc to a temp file on sdcard first
+            su("mkdir -p $tmpDir && cp \"" + dbPath + "\" $tmpDir/wxhook_inc_cp.db 2>/dev/null")
             val sqlCmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
-                "${binDir}/sqlcipher \"" + dbPath + "\" " +
+                "${binDir}/sqlcipher $tmpDir/wxhook_inc_cp.db " +
                 "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
@@ -391,13 +392,11 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
-                "2>/dev/null > \"" + outSql + "\""
+                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > \"" + outGz + "\""
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
             proc.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
-            val raw = java.io.File(outSql)
-            if (!raw.exists() || raw.length() == 0L) return ""
-            val outGz = "$outSql.gz"
-            su("" + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " < \"" + outSql + "\" > \"" + outGz + "\" && rm -f \"" + outSql + "\"")
+            // Clean up temp DB copy
+            su("rm -f $tmpDir/wxhook_inc_cp.db")
             if (java.io.File(outGz).exists() && java.io.File(outGz).length() > 0) return "OK:$outGz"
             ""
         } catch (e: Exception) { "" }
