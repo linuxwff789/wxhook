@@ -517,85 +517,92 @@ object BackupHookLocal {
     }
 
     fun rebuildDbState(): String {
-        val dir = File(BACKUP_DIR)
         val g = binDir + "/git"
-        val userDirs = dir.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") && !it.name.startsWith("tmp") } ?: emptyList()
-        if (userDirs.isEmpty()) return "备份目录为空"
         val results = mutableListOf<String>()
         val rebuiltRecords = JSONArray()
-        for (userDir in userDirs) {
-            val state = loadDbState(userDir)
-            state.put("restoredAt", System.currentTimeMillis())
-            val baseline = userDir.listFiles()?.find { it.name.startsWith("EnMicroMsg_baseline") && (it.name.endsWith(".sql.gz") || it.name.endsWith(".sql.zst")) }
-            if (baseline != null) {
-                state.put("baseline", baseline.name)
-                state.put("baselineSize", baseline.length())
-                state.put("lastBackupTime", baseline.lastModified())
-                rebuiltRecords.put(JSONObject().apply {
-                    put("tag", SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date(baseline.lastModified())))
-                    put("type", "full")
-                    put("time", baseline.lastModified())
-                    put("fileCount", 1)
-                    put("totalSize", baseline.length())
-                    put("compression", if (baseline.name.endsWith(".zst")) "zstd" else "gzip")
-                    put("message", "全量备份: ${baseline.name}")
-                    put("files", JSONArray().put(baseline.name))
-                })
-            }
-            val incrFiles = userDir.listFiles()?.filter { it.name.startsWith("incr_") && (it.name.endsWith(".sql.gz") || it.name.endsWith(".sql.zst")) }?.sortedBy { it.name } ?: emptyList()
-            if (incrFiles.isNotEmpty()) {
-                state.put("incrCount", incrFiles.size)
-                state.put("incrFiles", JSONArray(incrFiles.map { it.name }))
-                val lastFile = incrFiles.last()
-                val dec = if (lastFile.name.endsWith(".zst")) binDir + "/zstd -dc" else "gzip -dc"
-                try {
-                    val p = Runtime.getRuntime().exec(arrayOf("su", "-c", dec + " " + lastFile.absolutePath + " 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
-                    val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
-                    if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
-                } catch (_: Exception) {}
-                for (f in incrFiles) {
-                    val m = Regex("incr_(\\d+)_to_(\\d+)\\.sql\\.(gz|zst)").find(f.name)
-                    val from = m?.groupValues?.getOrNull(1)?.toLongOrNull() ?: 0L
-                    val to = m?.groupValues?.getOrNull(2)?.toLongOrNull() ?: 0L
+        return try {
+            val usersProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "find " + BACKUP_DIR + " -mindepth 1 -maxdepth 1 -type d | grep -v '/\\.' | grep -v '/tmp$' | grep -v '/.git$'"))
+            val userDirs = usersProc.inputStream.bufferedReader().readLines().filter { it.isNotBlank() }
+            usersProc.waitFor()
+            if (userDirs.isEmpty()) return "备份目录为空"
+            for (userPath in userDirs) {
+                val userDir = File(userPath)
+                val state = JSONObject().apply { put("restoredAt", System.currentTimeMillis()) }
+                val fileProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "find \"$userPath\" -maxdepth 1 -type f"))
+                val files = fileProc.inputStream.bufferedReader().readLines().map { File(it) }
+                fileProc.waitFor()
+                val baseline = files.find { it.name.startsWith("EnMicroMsg_baseline") && (it.name.endsWith(".sql.gz") || it.name.endsWith(".sql.zst")) }
+                if (baseline != null) {
+                    state.put("baseline", baseline.name)
+                    state.put("baselineSize", baseline.length())
+                    state.put("lastBackupTime", baseline.lastModified())
                     rebuiltRecords.put(JSONObject().apply {
-                        put("tag", SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date(f.lastModified())))
-                        put("type", "incremental")
-                        put("time", f.lastModified())
+                        put("tag", SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date(baseline.lastModified())))
+                        put("type", "full")
+                        put("time", baseline.lastModified())
                         put("fileCount", 1)
-                        put("totalSize", f.length())
-                        put("compression", if (f.name.endsWith(".zst")) "zstd" else "gzip")
-                        put("newFiles", 1)
-                        put("incrFrom", from)
-                        put("incrTo", to)
-                        put("message", "增量备份: DB:${from}→${to}")
-                        put("files", JSONArray().put(f.name))
+                        put("totalSize", baseline.length())
+                        put("compression", if (baseline.name.endsWith(".zst")) "zstd" else "gzip")
+                        put("message", "全量备份: ${baseline.name}")
+                        put("files", JSONArray().put(baseline.name))
                     })
                 }
-            } else if (baseline != null) {
-                val dec = if (baseline.name.endsWith(".zst")) binDir + "/zstd -dc" else "gzip -dc"
+                val incrFiles = files.filter { it.name.startsWith("incr_") && (it.name.endsWith(".sql.gz") || it.name.endsWith(".sql.zst")) }.sortedBy { it.name }
+                if (incrFiles.isNotEmpty()) {
+                    state.put("incrCount", incrFiles.size)
+                    state.put("incrFiles", JSONArray(incrFiles.map { it.name }))
+                    val lastFile = incrFiles.last()
+                    val dec = if (lastFile.name.endsWith(".zst")) binDir + "/zstd -dc" else "gzip -dc"
+                    try {
+                        val p = Runtime.getRuntime().exec(arrayOf("su", "-c", dec + " \"" + lastFile.absolutePath + "\" 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
+                        val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
+                        if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
+                    } catch (_: Exception) {}
+                    for (f in incrFiles) {
+                        val m = Regex("incr_(\\d+)_to_(\\d+)\\.sql\\.(gz|zst)").find(f.name)
+                        val from = m?.groupValues?.getOrNull(1)?.toLongOrNull() ?: 0L
+                        val to = m?.groupValues?.getOrNull(2)?.toLongOrNull() ?: 0L
+                        rebuiltRecords.put(JSONObject().apply {
+                            put("tag", SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date(f.lastModified())))
+                            put("type", "incremental")
+                            put("time", f.lastModified())
+                            put("fileCount", 1)
+                            put("totalSize", f.length())
+                            put("compression", if (f.name.endsWith(".zst")) "zstd" else "gzip")
+                            put("newFiles", 1)
+                            put("incrFrom", from)
+                            put("incrTo", to)
+                            put("message", "增量备份: DB:${from}→${to}")
+                            put("files", JSONArray().put(f.name))
+                        })
+                    }
+                } else if (baseline != null) {
+                    val dec = if (baseline.name.endsWith(".zst")) binDir + "/zstd -dc" else "gzip -dc"
+                    try {
+                        val p = Runtime.getRuntime().exec(arrayOf("su", "-c", dec + " \"" + baseline.absolutePath + "\" 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
+                        val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
+                        if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
+                    } catch (_: Exception) {}
+                }
                 try {
-                    val p = Runtime.getRuntime().exec(arrayOf("su", "-c", dec + " " + baseline.absolutePath + " 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
-                    val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
-                    if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
+                    val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "HOME=/data/local/tmp LD_LIBRARY_PATH=" + binDir + " " + g + " -C " + BACKUP_DIR + " rev-parse HEAD"))
+                    val hash = p.inputStream.bufferedReader().readText().trim().take(12)
+                    if (hash.isNotEmpty() && hash != "HEAD") state.put("gitCommit", hash)
                 } catch (_: Exception) {}
+                val tmpState = File(filesDirForWrite(), "db_state_${userDir.name}.json")
+                tmpState.writeText(state.toString())
+                Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmpState.absolutePath}\" \"${File(userDir, DB_STATE_FILE).absolutePath}\" && chmod 664 \"${File(userDir, DB_STATE_FILE).absolutePath}\"")).waitFor()
+                results.add("${userDir.name}: rowId=${state.optLong("lastMessageRowId", 0)} incr=${incrFiles.size} git=${state.optString("gitCommit", "-")}")
             }
-            try {
-                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "HOME=/data/local/tmp LD_LIBRARY_PATH=" + binDir + " " + g + " -C " + BACKUP_DIR + " rev-parse HEAD"))
-                val hash = p.inputStream.bufferedReader().readText().trim().take(12)
-                if (hash.isNotEmpty() && hash != "HEAD") state.put("gitCommit", hash)
-            } catch (_: Exception) {}
-            val tmpState = File(filesDirForWrite(), "db_state_${userDir.name}.json")
-            tmpState.writeText(state.toString())
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmpState.absolutePath}\" \"${File(userDir, DB_STATE_FILE).absolutePath}\" && chmod 664 \"${File(userDir, DB_STATE_FILE).absolutePath}\"")).waitFor()
-            results.add("${userDir.name}: rowId=${state.optLong("lastMessageRowId", 0)} incr=${incrFiles.size} git=${state.optString("gitCommit", "-")}")
+            val sorted = (0 until rebuiltRecords.length()).map { rebuiltRecords.getJSONObject(it) }.sortedBy { it.optLong("time", 0L) }
+            val outArr = JSONArray(); for (rec in sorted) outArr.put(rec)
+            val tmpRecords = File(filesDirForWrite(), RECORDS_FILE)
+            tmpRecords.writeText(outArr.toString())
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmpRecords.absolutePath}\" \"${File(BACKUP_DIR, RECORDS_FILE).absolutePath}\" && chmod 664 \"${File(BACKUP_DIR, RECORDS_FILE).absolutePath}\"")).waitFor()
+            results.joinToString("\n") + "\nrecords=" + sorted.size
+        } catch (e: Exception) {
+            "重建失败: ${e.message}"
         }
-        val sorted = (0 until rebuiltRecords.length()).map { rebuiltRecords.getJSONObject(it) }.sortedBy { it.optLong("time", 0L) }
-        val outArr = JSONArray()
-        for (rec in sorted) outArr.put(rec)
-        val tmpRecords = File(filesDirForWrite(), RECORDS_FILE)
-        tmpRecords.writeText(outArr.toString())
-        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmpRecords.absolutePath}\" \"${File(BACKUP_DIR, RECORDS_FILE).absolutePath}\" && chmod 664 \"${File(BACKUP_DIR, RECORDS_FILE).absolutePath}\"")).waitFor()
-        return results.joinToString("\n") + "\nrecords=" + sorted.size
     }
 
     data class Result(val success: Boolean, val message: String)
