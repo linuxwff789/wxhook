@@ -327,8 +327,20 @@ object BackupHookLocal {
         tmp.delete()
     }
 
-    private fun ext() = ".sql.gz"
-    private fun useZstd() = false
+    fun setCompressionUseZstd(enabled: Boolean) {
+        val cfg = try { JSONObject(backupRead(File(BACKUP_DIR, DB_CONFIG_FILE).absolutePath)) } catch (_: Exception) { JSONObject() }
+        cfg.put("zstd", enabled)
+        backupWrite(File(BACKUP_DIR, DB_CONFIG_FILE).absolutePath, cfg.toString())
+    }
+
+    private fun useZstd(): Boolean {
+        return try {
+            val cfg = JSONObject(backupRead(File(BACKUP_DIR, DB_CONFIG_FILE).absolutePath))
+            cfg.optBoolean("zstd", false)
+        } catch (_: Exception) { false }
+    }
+
+    private fun ext() = if (useZstd()) ".sql.zst" else ".sql.gz"
 
     private fun getDbPassword(): String {
         if (cachedPassword != null) return cachedPassword!!
@@ -432,7 +444,8 @@ object BackupHookLocal {
                 Runtime.getRuntime().exec(arrayOf("su", "-c", cleanupWork)).waitFor()
                 return ""
             }
-            val gzip = Runtime.getRuntime().exec(arrayOf("su", "-c", "gzip -c \"$workSql\" > \"$workOut\""))
+            val compressor = if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c"
+            val gzip = Runtime.getRuntime().exec(arrayOf("su", "-c", "$compressor \"$workSql\" > \"$workOut\""))
             val gzipFinished = gzip.waitFor(120, java.util.concurrent.TimeUnit.SECONDS)
             if (!gzipFinished) gzip.destroyForcibly()
             val outputSize = RootCommandRunner.runSuQuiet("stat -c %s \"$workOut\" 2>/dev/null").trim().toLongOrNull() ?: 0L

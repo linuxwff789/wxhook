@@ -89,6 +89,7 @@ class SettingsActivity : AppCompatActivity() {
         // ── Backup section ──
         items.add(SettingsItem.Header("📂 备份设置"))
         items.add(SettingsItem.Input("备份路径", "backup_path", "/sdcard/Download/wxhook_backup"))
+        items.add(SettingsItem.Toggle("使用 zstd 压缩（关闭则使用 gzip）", "zstd", false))
         items.add(SettingsItem.Header("🛠 工具"))
         items.add(SettingsItem.Button("重建备份状态", "rebuild_state"))
 
@@ -290,12 +291,8 @@ class SettingsAdapter(
                     val o = runCatching { JSONObject(File(ctx.filesDir, "settings_config.json").readText()) }.getOrDefault(JSONObject())
                     o.put(item.key, checked)
                     File(ctx.filesDir, "settings_config.json").writeText(o.toString())
-                    // Also sync zstd setting to db_config.json for BackupHookLocal
                     if (item.key == "zstd") {
-                        val dbCfg = File("/sdcard/Download/wxhook_backup/db_config.json")
-                        val d = runCatching { JSONObject(dbCfg.readText()) }.getOrDefault(JSONObject())
-                        d.put("zstd", checked)
-                        dbCfg.writeText(d.toString())
+                        runCatching { BackupHookLocal.setCompressionUseZstd(checked) }
                     }
                 }
             }
