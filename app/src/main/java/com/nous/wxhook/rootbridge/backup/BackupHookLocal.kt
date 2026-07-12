@@ -381,12 +381,13 @@ object BackupHookLocal {
         val outGz = "$tmpDir/wxhook_inc_out.sql.gz"
         return try {
             // Write entry marker to file (Log.e may not show on all devices)
-            java.io.File("/sdcard/Download/wxhook_backup/tmp/dec_step.txt").writeText("entry")
+            val stepFile = java.io.File(filesDirForWrite(), "dec_step.txt")
+            stepFile.writeText("entry")
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
-            java.io.File("/sdcard/Download/wxhook_backup/tmp/dec_step.txt").writeText("pwd_ok")
+            stepFile.writeText("pwd_ok")
             su("mkdir -p $tmpDir")
-            java.io.File("/sdcard/Download/wxhook_backup/tmp/dec_step.txt").writeText("mkdir_ok")
+            stepFile.writeText("mkdir_ok")
             // dd sequential read for /proc
             Runtime.getRuntime().exec(arrayOf("su", "-c", "dd if=\"" + dbPath + "\" of=$localDb bs=4M 2>/dev/null &"))
             var waited = 0
@@ -395,7 +396,7 @@ object BackupHookLocal {
                 val f = java.io.File(localDb)
                 if (f.exists() && f.length() > 1000000) break
             }
-            java.io.File("/sdcard/Download/wxhook_backup/tmp/dec_step.txt").writeText("dd_done_sz=${java.io.File(localDb).length()}")
+            stepFile.writeText("dd_done_sz=${java.io.File(localDb).length()}")
             if (java.io.File(localDb).length() < 1000000) return ""
             val sqlCmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
                 "${binDir}/sqlcipher $localDb " +
@@ -407,14 +408,14 @@ object BackupHookLocal {
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
                 "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > \"" + outGz + "\""
-            java.io.File("/sdcard/Download/wxhook_backup/tmp/dec_step.txt").writeText("sqlcipher_exec")
+            stepFile.writeText("sqlcipher_exec")
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
             proc.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
-            java.io.File("/sdcard/Download/wxhook_backup/tmp/dec_step.txt").writeText("sqlcipher_done_rc=${proc.exitValue()}")
+            stepFile.writeText("sqlcipher_done_rc=${proc.exitValue()}")
             su("rm -f $localDb")
             if (java.io.File(outGz).exists() && java.io.File(outGz).length() > 0) return "OK:$outGz"
             ""
-        } catch (e: Exception) { java.io.File("/sdcard/Download/wxhook_backup/tmp/dec_step.txt").writeText("catch=${e.message}"); "" }
+        } catch (e: Exception) { stepFile.writeText("catch=${e.message}"); "" }
     }
 
     private fun compressGzip(data: ByteArray): ByteArray {
