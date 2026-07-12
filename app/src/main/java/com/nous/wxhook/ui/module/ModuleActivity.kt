@@ -216,6 +216,16 @@ class ModuleActivity : AppCompatActivity() {
         recordsCard.addView(logView)
         root.addView(recordsCard)
 
+        // Load persisted live log first
+        Thread {
+            try {
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "tail -50 /sdcard/Download/wxhook_backup/backup_live.log 2>/dev/null"))
+                val txt = p.inputStream.bufferedReader().readText().trim()
+                p.waitFor()
+                if (txt.isNotEmpty()) handler.post { logView.text = txt }
+            } catch (_: Exception) {}
+        }.start()
+
         // Load records
         Thread { try { val records = BackupManager.getRecords(); val sb = StringBuilder(); records.take(10).forEach { r -> val time = BackupManager.formatTime(r.time); val size = BackupManager.formatSize(r.totalSize); val type = if (r.type == "full") "全量" else "增量"; sb.appendLine("[$time] $type | $size | ${r.fileCount}文件"); sb.appendLine("  ${r.message}") }; handler.post { logView.text = sb.toString() } } catch (e: Exception) { handler.post { logView.text = "记录加载失败" } } }.start()
 
@@ -431,7 +441,14 @@ class ModuleActivity : AppCompatActivity() {
     private fun log(msg: String) {
         android.util.Log.i("wxhook:Backup", msg)
         val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        logView.text = "[$time] $msg\n${logView.text}"
+        val line = "[$time] $msg"
+        logView.text = "$line\n${logView.text}"
+        try {
+            val tmp = File(filesDir, "backup_live.log")
+            tmp.appendText(line + "\n")
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p /sdcard/Download/wxhook_backup && cat \"${tmp.absolutePath}\" >> /sdcard/Download/wxhook_backup/backup_live.log && chmod 644 /sdcard/Download/wxhook_backup/backup_live.log")).waitFor()
+            tmp.writeText("")
+        } catch (_: Exception) {}
     }
 
     private fun makeCardTitle(text: String): TextView {
