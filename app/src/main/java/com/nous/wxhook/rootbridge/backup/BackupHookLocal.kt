@@ -370,14 +370,16 @@ object BackupHookLocal {
     }
     private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
+        val localDb = "$tmpDir/wxhook_inc.db"
         val outGz = "$tmpDir/wxhook_inc_out.sql.gz"
         return try {
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
-            // Clean old output (no DB copy - sqlcipher works directly on /proc path)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f $outGz 2>/dev/null")).waitFor()
+            // cp from /proc (original method, works reliably)
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f $localDb $tmpDir/wxhook_inc.db-shm $tmpDir/wxhook_inc.db-wal $outGz && cp \"" + dbPath + "\" $localDb && chmod 644 $localDb")).waitFor(120, java.util.concurrent.TimeUnit.SECONDS)
+            if (java.io.File(localDb).length() < 1000000) return ""
             val sqlCmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
-                "${binDir}/sqlcipher \"" + dbPath + "\" " +
+                "${binDir}/sqlcipher $localDb " +
                 "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
@@ -388,6 +390,7 @@ object BackupHookLocal {
                 "2>/dev/null | gzip -c > \"" + outGz + "\""
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
             proc.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
+            su("rm -f $localDb 2>/dev/null")
             if (java.io.File(outGz).exists() && java.io.File(outGz).length() > 0) return "OK:$outGz"
             ""
         } catch (e: Exception) { "" }
