@@ -396,7 +396,7 @@ object BackupHookLocal {
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
             // dd from /proc (background, poll for completion)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "dd if=\" + dbPath + "\" of=$localDb bs=4M 2>/dev/null &"))
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "dd if=\"" + dbPath + "\" of=$localDb bs=4M 2>/dev/null &"))
             var waited = 0
             while (waited < 120) {
                 Thread.sleep(1000); waited++
