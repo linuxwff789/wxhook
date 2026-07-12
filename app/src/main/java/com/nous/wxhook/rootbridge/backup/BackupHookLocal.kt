@@ -356,18 +356,12 @@ object BackupHookLocal {
     }
 
     private fun decryptAndDump(dbPath: String): String {
-        // Use base64 script + setsid to survive MIUI background kill
-        val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
-        val shPath = "/data/local/tmp/decrypt_full.sh"
-        val doneFile = "$tmpDir/decrypt_full_done.txt"
+        val tmpDir = "/data/local/tmp"
         val gzFile = "$tmpDir/EnMicroMsg_baseline" + ext()
         return try {
             val pwd = getDbPassword()
-            val script = ("#!/system/bin/sh\n" +
-                "mkdir -p $tmpDir\n" +
-                "cp \"" + dbPath + "\" $tmpDir/wxhook_dec.db 2>/dev/null\n" +
-                "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
-                "${binDir}/sqlcipher $tmpDir/wxhook_dec.db " +
+            val cmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
+                "${binDir}/sqlcipher \"" + dbPath + "\" " +
                 "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
@@ -375,15 +369,9 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message;' " +
-                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > $gzFile 2>/dev/null\n" +
-                "chmod 644 $gzFile 2>/dev/null\n" +
-                "rm -f $tmpDir/wxhook_dec.db 2>/dev/null\n" +
-                "date > " + doneFile + "\n" +  // write start time instead of "done"
-                "echo done >> " + doneFile + "\n")
-            val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
-            su("printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "sh $shPath > /data/local/tmp/decrypt_exec.log 2>&1"))
-            proc.waitFor()
+                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > \"" + gzFile + "\""
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            proc.waitFor(600, java.util.concurrent.TimeUnit.SECONDS)
             if (java.io.File(gzFile).exists() && java.io.File(gzFile).length() > 0) return "OK:$gzFile"
             ""
         } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptAndDump: $e"); "" }
