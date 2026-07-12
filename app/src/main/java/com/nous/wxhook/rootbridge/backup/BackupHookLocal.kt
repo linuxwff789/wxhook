@@ -21,7 +21,7 @@ object BackupHookLocal {
     private const val DB_CONFIG_FILE = "db_config.json"
     private const val DB_STATE_FILE = "db_state.json"
     private const val RCLONE_REMOTE = "gdrive:wxhook-backup"
-    private const val BACKUP_DIR = "/data/local/tmp/wxhook_backup"
+    private const val BACKUP_DIR = "/sdcard/Download/wxhook_backup"
     private var binDir = "/data/data/com.termux/files/usr/bin"
     private var filesDirPath = "/data/local/tmp"
     val binPath: String get() = binDir
@@ -30,6 +30,9 @@ object BackupHookLocal {
         binDir = "/data/local/tmp/wxhook_bin"
         filesDirPath = ctx.filesDir.absolutePath
         rcloneConfigPath = ctx.filesDir.absolutePath + "/.config/rclone/rclone.conf"
+        // Ensure backup dir exists (app process, not root)
+        try { java.io.File(BACKUP_DIR).mkdirs() } catch (_: Exception) {}
+        try { java.io.File("$BACKUP_DIR/tmp").mkdirs() } catch (_: Exception) {}
     }
     private var rcloneConfigPath = ""
     private fun filesDirForWrite() = File(filesDirPath).apply { mkdirs() }
@@ -344,12 +347,16 @@ object BackupHookLocal {
     }
 
     private fun decryptAndDump(dbPath: String): String {
-        val tmpDir = "/data/local/tmp"
+        val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
+        val shPath = "/data/local/tmp/decrypt_full.sh"
         val gzFile = "$tmpDir/EnMicroMsg_baseline" + ext()
         return try {
             val pwd = getDbPassword()
-            val cmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
-                "${binDir}/sqlcipher \"" + dbPath + "\" " +
+            val script = ("#!/system/bin/sh\n" +
+                "mkdir -p $tmpDir\n" +
+                "cp \"" + dbPath + "\" $tmpDir/wxhook_dec.db 2>/dev/null\n" +
+                "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
+                "${binDir}/sqlcipher $tmpDir/wxhook_dec.db " +
                 "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
@@ -357,8 +364,10 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message;' " +
-                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > \"" + gzFile + "\""
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > $gzFile 2>/dev/null\n")
+            val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
+            su("printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "sh $shPath > /data/local/tmp/decrypt_exec.log 2>&1"))
             proc.waitFor(600, java.util.concurrent.TimeUnit.SECONDS)
             if (java.io.File(gzFile).exists() && java.io.File(gzFile).length() > 0) return "OK:$gzFile"
             ""
