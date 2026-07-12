@@ -161,7 +161,10 @@ object BackupHookLocal {
                 userDir.mkdirs()
 
                 val dbState = loadDbState(userDir)
+                android.util.Log.e("wxhook:INCR", "userDir=${userDir.absolutePath}")
+                android.util.Log.e("wxhook:INCR", "dbState=${dbState}")
                 val lastRowId = dbState.optLong("lastMessageRowId", 0)
+                android.util.Log.e("wxhook:INCR", "lastRowId=$lastRowId")
                 if (lastRowId <= 0) {
                     callback?.onProgress("[$userHash] 无基线数据，请先全量备份", totalFiles, totalSize)
                     continue
@@ -430,7 +433,19 @@ object BackupHookLocal {
 
     private fun loadDbState(userDir: File): JSONObject {
         val f = File(userDir, DB_STATE_FILE)
-        return if (f.exists()) try { JSONObject(f.readText()) } catch (_: Exception) { JSONObject() } else JSONObject()
+        return if (f.exists()) {
+            try {
+                val txt = f.readText()
+                android.util.Log.e("wxhook:INCR", "read ${f.absolutePath}: $txt")
+                JSONObject(txt)
+            } catch (e: Exception) {
+                android.util.Log.e("wxhook:INCR", "loadDbState failed: $e")
+                JSONObject()
+            }
+        } else {
+            android.util.Log.e("wxhook:INCR", "db_state missing: ${f.absolutePath}")
+            JSONObject()
+        }
     }
 
     private fun updateDbState(userDir: File, tag: String, newRowId: String) {
