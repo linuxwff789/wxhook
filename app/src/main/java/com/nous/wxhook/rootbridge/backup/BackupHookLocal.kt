@@ -385,7 +385,8 @@ object BackupHookLocal {
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
             su("echo pwd_ok >> /data/local/tmp/dec_step2.txt")
-            su("mkdir -p $tmpDir")
+            // mkdir via direct exec (avoid RootCommandRunner threading issue)
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $tmpDir 2>/dev/null")).waitFor()
             su("echo mkdir_ok >> /data/local/tmp/dec_step2.txt")
             // dd sequential read for /proc
             Runtime.getRuntime().exec(arrayOf("su", "-c", "dd if=\"" + dbPath + "\" of=$localDb bs=4M 2>/dev/null &"))
