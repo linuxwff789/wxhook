@@ -186,12 +186,10 @@ object BackupHookLocal {
                     val gzPath = incResult.substring(3)
                     val gzFile = java.io.File(gzPath)
                     if (gzFile.exists() && gzFile.length() > 0) {
-                        // Extract last rowid from output file
+                        // Extract last rowid from gz file (read only last line)
                         incrTo = runCatching {
                             val dec = if (useZstd()) "${binDir}/zstd -dc" else "gzip -dc"
-                            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
-                                dec + " " + gzFile.absolutePath + " 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
-                            proc.inputStream.bufferedReader().readText().trim().toLong()
+                            suOut(dec + " \"" + gzFile.absolutePath + "\" 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1").trim().toLong()
                         }.getOrDefault(lastRowId)
                         val incrFile = File(userDir, "incr_${incrFrom}_to_${incrTo}" + ext())
                         val renamed = gzFile.renameTo(incrFile)
@@ -320,9 +318,7 @@ object BackupHookLocal {
     private fun getDbPassword(): String {
         if (cachedPassword != null) return cachedPassword!!
         cachedPassword = try {
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /data/local/tmp/.wechat_key 2>/dev/null"))
-            val raw = proc.inputStream.bufferedReader().readText()
-            proc.waitFor()
+            val raw = suOut("cat /data/local/tmp/.wechat_key 2>/dev/null")
             // Parse key=hex format: key=65396364326165 → e9cd2ae
             val keyLine = raw.lines().firstOrNull { it.startsWith("key=") }
             if (keyLine != null) {
@@ -372,7 +368,7 @@ object BackupHookLocal {
                 "date > " + doneFile + "\n" +  // write start time instead of "done"
                 "echo done >> " + doneFile + "\n")
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
+            su("printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "sh $shPath > /data/local/tmp/decrypt_exec.log 2>&1"))
             proc.waitFor()
             if (java.io.File(gzFile).exists() && java.io.File(gzFile).length() > 0) return "OK:$gzFile"
@@ -446,7 +442,7 @@ object BackupHookLocal {
 
     private fun compressFileSu(srcPath: String, dstPath: String) {
         try {
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "" + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " \"" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\" &")).waitFor()
+            su("" + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " \"" + srcPath + "\" > \"" + dstPath + "\" && chmod 644 \"" + dstPath + "\" &")
         } catch (_: Exception) {}
     }
 
