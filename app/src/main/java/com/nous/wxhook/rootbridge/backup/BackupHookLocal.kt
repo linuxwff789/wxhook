@@ -381,22 +381,16 @@ object BackupHookLocal {
         val localDb = "$tmpDir/wxhook_inc.db"
         val outGz = "$tmpDir/wxhook_inc_out.sql.gz"
         return try {
-            // Write entry marker via su (avoids app file permission issues)
-            su("echo entry > /data/local/tmp/dec_step2.txt")
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
-            su("echo pwd_ok >> /data/local/tmp/dec_step2.txt")
-            // /data/local/tmp already exists, no mkdir needed
-            su("echo mkdir_ok >> /data/local/tmp/dec_step2.txt")
-            // dd sequential read for /proc
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "dd if=\"" + dbPath + "\" of=$localDb bs=4M 2>/dev/null &"))
+            // dd from /proc (background, poll for completion)
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "dd if=\" + dbPath + "\" of=$localDb bs=4M 2>/dev/null &"))
             var waited = 0
             while (waited < 120) {
                 Thread.sleep(1000); waited++
                 val f = java.io.File(localDb)
                 if (f.exists() && f.length() > 1000000) break
             }
-            su("echo dd_ok >> /data/local/tmp/dec_step2.txt")
             if (java.io.File(localDb).length() < 1000000) return ""
             val sqlCmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
                 "${binDir}/sqlcipher $localDb " +
@@ -408,15 +402,14 @@ object BackupHookLocal {
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
                 "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > \"" + outGz + "\""
-            su("echo exec_sqlcipher >> /data/local/tmp/dec_step2.txt")
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
             proc.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
-            su("echo rc_${proc.exitValue()} >> /data/local/tmp/dec_step2.txt")
             su("rm -f $localDb")
             if (java.io.File(outGz).exists() && java.io.File(outGz).length() > 0) return "OK:$outGz"
             ""
-        } catch (e: Exception) { su("echo catch_${e.message} >> /data/local/tmp/dec_step2.txt"); "" }
+        } catch (e: Exception) { "" }
     }
+
 
     private fun compressGzip(data: ByteArray): ByteArray {
         val bos = java.io.ByteArrayOutputStream()
