@@ -179,8 +179,8 @@ object BackupHookLocal {
                 if (incResult.startsWith("OK:")) {
                     val gzPath = incResult.substring(3)
                     val gzFile = java.io.File(gzPath)
-                    if (gzFile.exists()) {
-                        // Extract last rowid from gz file (read only last line)
+                    if (gzFile.exists() && gzFile.length() > 0) {
+                        // Extract last rowid from output file
                         incrTo = runCatching {
                             val dec = if (useZstd()) "${binDir}/zstd -dc" else "gzip -dc"
                             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
@@ -188,10 +188,16 @@ object BackupHookLocal {
                             proc.inputStream.bufferedReader().readText().trim().toLong()
                         }.getOrDefault(lastRowId)
                         val incrFile = File(userDir, "incr_${incrFrom}_to_${incrTo}" + ext())
-                        gzFile.renameTo(incrFile)
-                        totalFiles++; totalSize += incrFile.length(); newFiles++
-                        updateDbState(userDir, tag, incrTo.toString())
-                        callback?.onProgress("[$userHash] DB增量: ${incrTo - incrFrom}条新消息", totalFiles, totalSize)
+                        val renamed = gzFile.renameTo(incrFile)
+                        if (renamed && incrFile.exists() && incrFile.length() > 0) {
+                            totalFiles++; totalSize += incrFile.length(); newFiles++
+                            updateDbState(userDir, tag, incrTo.toString())
+                            callback?.onProgress("[$userHash] DB增量: ${incrTo - incrFrom}条新消息", totalFiles, totalSize)
+                        } else {
+                            callback?.onProgress("[$userHash] DB增量文件无效/重命名失败", totalFiles, totalSize)
+                        }
+                    } else {
+                        callback?.onProgress("[$userHash] DB增量输出为空", totalFiles, totalSize)
                     }
                 }
             }
