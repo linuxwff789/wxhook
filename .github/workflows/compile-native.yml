@@ -4,6 +4,9 @@ on:
   push:
     branches: [ native-binaries ]
 
+permissions:
+  contents: write
+
 jobs:
   compile:
     runs-on: ubuntu-latest
