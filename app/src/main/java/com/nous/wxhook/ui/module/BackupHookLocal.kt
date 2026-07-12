@@ -104,8 +104,8 @@ object BackupHookLocal {
                     val src = "$wxBasePath/$attDir"
                     val dst = "${userDir.absolutePath}/$attDir"
                     try {
-                        Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $dst")).waitFor()
-                        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp -r " + src + " " + dst + " 2>/dev/null && chmod -R 644 " + dst + " 2>/dev/null")).waitFor()
+                        su("mkdir -p $dst")
+                        su("cp -r " + src + " " + dst + " 2>/dev/null && chmod -R 644 " + dst + " 2>/dev/null")
                         val d = File(dst)
                         if (d.exists()) {
                             totalFiles += d.walkTopDown().filter { it.isFile }.count()
@@ -218,16 +218,15 @@ object BackupHookLocal {
                     val src = "$wxBasePath/$attDir"
                     val dst = "${userDir.absolutePath}/$attDir"
                     try {
-                        val findProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "find $src -type f -newermt @$lastTime 2>/dev/null"))
-                        val list = findProc.inputStream.bufferedReader().readLines().filter { it.isNotBlank() }
-                        findProc.waitFor()
+                        val findOut = suOut("find $src -type f -newermt @$lastTime 2>/dev/null")
+                        val list = findOut.lines().filter { it.isNotBlank() }
                         if (list.isNotEmpty()) {
                             callback?.onProgress("[$userHash] 增量 $attDir: ${list.size}个", totalFiles, totalSize)
                             for (fp in list) {
                                 val rel = fp.removePrefix("$src/")
                                 val dstFile = File(dst, rel)
                                 dstFile.parentFile?.mkdirs()
-                                Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"$fp\" \"${dstFile.absolutePath}\" && chmod 644 \"${dstFile.absolutePath}\"")).waitFor()
+                                su("cp \"$fp\" \"${dstFile.absolutePath}\" && chmod 644 \"${dstFile.absolutePath}\"")
                                 if (dstFile.exists()) { totalFiles++; totalSize += dstFile.length(); newFiles++ }
                             }
                         }
@@ -287,7 +286,7 @@ object BackupHookLocal {
         try {
             val configFile = File(BACKUP_DIR, "remote_config.json")
             if (!configFile.exists()) return
-            val config = JSONObject(configFile.readText())
+            val config = JSONObject(suOut("cat \"${configFile.absolutePath}\" 2>/dev/null").ifBlank { "{}" })
             val enabled = config.optBoolean("enabled", false)
             if (!enabled) return
             val remote = config.optString("remote", "")
