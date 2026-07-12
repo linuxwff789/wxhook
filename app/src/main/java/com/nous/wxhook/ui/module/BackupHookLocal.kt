@@ -142,6 +142,7 @@ object BackupHookLocal {
 
     fun doIncrementalBackup(callback: ProgressCallback? = null): Result {
         val startTime = System.currentTimeMillis()
+        android.util.Log.e("wxhook:CLICK", "BackupHookLocal.doIncrementalBackup enter")
         return try {
             val state = loadState()
             val lastTime = state.optLong("lastBackupTime", 0L)

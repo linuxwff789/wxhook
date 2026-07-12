@@ -186,14 +186,20 @@ class ModuleActivity : AppCompatActivity() {
 
         backupBtn = Button(this).apply {
             text = "全量备份 (DB + 附件)"
-            setOnClickListener { doBackup(false, compressSwitch.isChecked) }
+            setOnClickListener {
+                android.util.Log.e("wxhook:CLICK", "full backup clicked")
+                doBackup(false, compressSwitch.isChecked)
+            }
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(12), dp(8), dp(12), dp(4)) }
         }
         backupCard.addView(backupBtn)
 
         incrBtn = Button(this).apply {
             text = "增量备份 (仅新文件)"
-            setOnClickListener { doBackup(true, compressSwitch.isChecked) }
+            setOnClickListener {
+                android.util.Log.e("wxhook:CLICK", "incremental backup clicked")
+                doBackup(true, compressSwitch.isChecked)
+            }
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(12), dp(4), dp(12), dp(8)) }
         }
         backupCard.addView(incrBtn)
@@ -218,7 +224,8 @@ class ModuleActivity : AppCompatActivity() {
     }
 
     private fun doBackup(incremental: Boolean, compress: Boolean = true) {
-        android.util.Log.i("wxhook:Backup", "doBackup clicked: incremental=$incremental")
+        android.util.Log.e("wxhook:CLICK", "doBackup incremental=$incremental compress=$compress")
+        val btn = if (incremental) incrBtn else backupBtn
         if (isBackingUp) { log("⏳ 正在备份中..."); return }
         isBackingUp = true
         backupBtn.isEnabled = false; incrBtn.isEnabled = false
