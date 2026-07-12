@@ -188,11 +188,8 @@ object BackupHookLocal {
                             proc.inputStream.bufferedReader().readText().trim().toLong()
                         }.getOrDefault(lastRowId)
                         val incrFile = File(userDir, "incr_${incrFrom}_to_${incrTo}" + ext())
-                        val moved = runCatching {
-                            Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${gzFile.absolutePath}\" \"${incrFile.absolutePath}\" && chmod 644 \"${incrFile.absolutePath}\" && rm -f \"${gzFile.absolutePath}\"")).waitFor()
-                            incrFile.exists() && incrFile.length() > 0
-                        }.getOrDefault(false)
-                        if (moved) {
+                        val renamed = gzFile.renameTo(incrFile)
+                        if (renamed && incrFile.exists() && incrFile.length() > 0) {
                             totalFiles++; totalSize += incrFile.length(); newFiles++
                             updateDbState(userDir, tag, incrTo.toString())
                             callback?.onProgress("[$userHash] DB增量: ${incrTo - incrFrom}条新消息", totalFiles, totalSize)
