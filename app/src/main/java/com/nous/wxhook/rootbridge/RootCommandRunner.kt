@@ -16,10 +16,10 @@ object RootCommandRunner {
             val out = StringBuilder()
             val err = StringBuilder()
             val outThread = Thread {
-                proc.inputStream.bufferedReader().useLines { lines -> lines.forEach { out.appendLine(it) } }
+                try { proc.inputStream.bufferedReader().useLines { lines -> lines.forEach { out.appendLine(it) } } } catch (_: Exception) {}
             }
             val errThread = Thread {
-                proc.errorStream.bufferedReader().useLines { lines -> lines.forEach { err.appendLine(it) } }
+                try { proc.errorStream.bufferedReader().useLines { lines -> lines.forEach { err.appendLine(it) } } } catch (_: Exception) {}
             }
             outThread.start(); errThread.start()
             val finished = proc.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
