@@ -242,26 +242,9 @@ class ModuleActivity : AppCompatActivity() {
         backupBtn.text = "备份中..."; incrBtn.text = "备份中..."
 
         Thread {
-            val dir = pathInput.text.toString().trim()
-            val cb = object : BackupHookLocal.ProgressCallback {
-                override fun onProgress(current: String, fileCount: Long, totalSize: Long) {
-                    handler.post { log("⏳ $current") }
-                }
-            }
-            val result = if (incremental) {
-                BackupHookLocal.doIncrementalBackup(cb)
-            } else {
-                BackupHookLocal.doFullBackup(cb)
-            }
-
+            log(if (incremental) "已启动前台服务: 增量备份" else "已启动前台服务: 全量备份")
+            com.nous.wxhook.service.BackupService.start(this, incremental)
             handler.post {
-                if (result.success) {
-                    val sizeStr = "备份完成"
-                    log("✅ ${result.message} ($sizeStr)")
-                } else {
-                    log("❌ ${result.message}")
-                }
-                Thread { try { val records = BackupManager.getRecords(); val sb = StringBuilder(); records.take(10).forEach { r -> val time = BackupManager.formatTime(r.time); val size = BackupManager.formatSize(r.totalSize); val type = if (r.type == "full") "全量" else "增量"; sb.appendLine("[$time] $type | $size | ${r.fileCount}文件"); sb.appendLine("  ${r.message}") }; handler.post { logView.text = sb.toString() } } catch (e: Exception) { handler.post { logView.text = "记录加载失败" } } }.start()
                 isBackingUp = false
                 backupBtn.isEnabled = true; incrBtn.isEnabled = true
                 backupBtn.text = "全量备份 (DB + 附件)"; incrBtn.text = "增量备份 (仅新文件)"

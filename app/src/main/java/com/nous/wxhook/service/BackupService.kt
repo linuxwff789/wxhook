@@ -1,0 +1,94 @@
+package com.nous.wxhook.service
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
+import com.nous.wxhook.ui.module.BackupHookLocal
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+class BackupService : Service() {
+    companion object {
+        private const val CHANNEL_ID = "wxhook_backup"
+        private const val NOTIFICATION_ID = 1002
+        private const val ACTION_START = "com.nous.wxhook.BACKUP_START"
+        private const val EXTRA_INCREMENTAL = "incremental"
+
+        fun start(ctx: Context, incremental: Boolean) {
+            val i = Intent(ctx, BackupService::class.java).apply {
+                action = ACTION_START
+                putExtra(EXTRA_INCREMENTAL, incremental)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i) else ctx.startService(i)
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_START) {
+            val incremental = intent.getBooleanExtra(EXTRA_INCREMENTAL, true)
+            startBackup(incremental)
+        }
+        return START_NOT_STICKY
+    }
+
+    private fun startBackup(incremental: Boolean) {
+        startForeground(NOTIFICATION_ID, createNotification(if (incremental) "增量备份中..." else "全量备份中..."))
+        Thread {
+            try {
+                BackupHookLocal.init(this)
+                appendLog("服务启动: " + if (incremental) "增量备份" else "全量备份")
+                val cb = object : BackupHookLocal.ProgressCallback {
+                    override fun onProgress(current: String, fileCount: Long, totalSize: Long) {
+                        updateNotification(current)
+                        appendLog(current)
+                    }
+                }
+                val result = if (incremental) BackupHookLocal.doIncrementalBackup(cb) else BackupHookLocal.doFullBackup(cb)
+                appendLog((if (result.success) "完成: " else "失败: ") + result.message)
+                updateNotification(result.message)
+            } catch (e: Exception) {
+                appendLog("服务异常: ${e.message}")
+                updateNotification("服务异常: ${e.message}")
+            }
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ stopSelf() }, 3000)
+        }.start()
+    }
+
+    private fun appendLog(msg: String) {
+        try {
+            val line = "[" + SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()) + "] " + msg
+            val tmp = File(filesDir, "backup_live.log")
+            tmp.appendText(line + "\n")
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p /sdcard/Download/wxhook_backup && cat \"${tmp.absolutePath}\" >> /sdcard/Download/wxhook_backup/backup_live.log && chmod 644 /sdcard/Download/wxhook_backup/backup_live.log")).waitFor()
+            tmp.writeText("")
+        } catch (_: Exception) {}
+    }
+
+    private fun createNotification(text: String): Notification {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(CHANNEL_ID, "备份服务", NotificationManager.IMPORTANCE_LOW)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setContentTitle("wxhook 备份")
+            .setContentText(text)
+            .setOngoing(true)
+            .build()
+    }
+
+    private fun updateNotification(text: String) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIFICATION_ID, createNotification(text))
+    }
+}
