@@ -449,12 +449,18 @@ object BackupHookLocal {
     private fun findWxPaths(): List<String> {
         val paths = mutableListOf<String>()
         try {
-            val pid = suOut("pidof com.tencent.mm").trim()
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
+            val pid = proc.inputStream.bufferedReader().readText().trim()
+            proc.waitFor()
             if (pid.isNotEmpty()) {
                 val basePath = "/proc/$pid/root/data/data/com.tencent.mm/MicroMsg"
-                val dirs = suOut("ls $basePath 2>/dev/null").lines().filter { it.isNotBlank() }
+                val lsProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $basePath 2>/dev/null"))
+                val dirs = lsProc.inputStream.bufferedReader().readLines().filter { it.isNotBlank() }
+                lsProc.waitFor()
                 for (d in dirs) {
-                    val out = suOut("ls $basePath/$d/EnMicroMsg.db 2>/dev/null").trim()
+                    val check = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls $basePath/$d/EnMicroMsg.db 2>/dev/null"))
+                    val out = check.inputStream.bufferedReader().readText().trim()
+                    check.waitFor()
                     if (out.isNotEmpty()) paths.add("$basePath/$d")
                 }
             }
@@ -522,12 +528,16 @@ object BackupHookLocal {
         val results = mutableListOf<String>()
         val rebuiltRecords = JSONArray()
         return try {
-            val userDirs = suOut("find " + BACKUP_DIR + " -mindepth 1 -maxdepth 1 -type d | grep -v '/\\.' | grep -v '/tmp$' | grep -v '/.git$'").lines().filter { it.isNotBlank() }
+            val usersProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "find " + BACKUP_DIR + " -mindepth 1 -maxdepth 1 -type d | grep -v '/\\.' | grep -v '/tmp$' | grep -v '/.git$'"))
+            val userDirs = usersProc.inputStream.bufferedReader().readLines().filter { it.isNotBlank() }
+            usersProc.waitFor()
             if (userDirs.isEmpty()) return "备份目录为空"
             for (userPath in userDirs) {
                 val userDir = File(userPath)
                 val state = JSONObject().apply { put("restoredAt", System.currentTimeMillis()) }
-                val files = suOut("find " + userPath + " -maxdepth 1 -type f").lines().filter { it.isNotBlank() }.map { File(it) }
+                val fileProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "find \"$userPath\" -maxdepth 1 -type f"))
+                val files = fileProc.inputStream.bufferedReader().readLines().map { File(it) }
+                fileProc.waitFor()
                 val baseline = files.find { it.name.startsWith("EnMicroMsg_baseline") && (it.name.endsWith(".sql.gz") || it.name.endsWith(".sql.zst")) }
                 if (baseline != null) {
                     state.put("baseline", baseline.name)
@@ -551,7 +561,8 @@ object BackupHookLocal {
                     val lastFile = incrFiles.last()
                     val dec = if (lastFile.name.endsWith(".zst")) binDir + "/zstd -dc" else "gzip -dc"
                     try {
-                        val rowId = suOut(dec + " \\\"" + lastFile.absolutePath + "\\\" 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1").trim().toLongOrNull()
+                        val p = Runtime.getRuntime().exec(arrayOf("su", "-c", dec + " \"" + lastFile.absolutePath + "\" 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
+                        val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
                         if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
                     } catch (_: Exception) {}
                     for (f in incrFiles) {
@@ -575,24 +586,26 @@ object BackupHookLocal {
                 } else if (baseline != null) {
                     val dec = if (baseline.name.endsWith(".zst")) binDir + "/zstd -dc" else "gzip -dc"
                     try {
-                        val rowId = suOut(dec + " \\\"" + baseline.absolutePath + "\\\" 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1").trim().toLongOrNull()
+                        val p = Runtime.getRuntime().exec(arrayOf("su", "-c", dec + " \"" + baseline.absolutePath + "\" 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
+                        val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
                         if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
                     } catch (_: Exception) {}
                 }
                 try {
-                    val hash = suOut("HOME=/data/local/tmp LD_LIBRARY_PATH=" + binDir + " " + g + " -C " + BACKUP_DIR + " rev-parse HEAD").trim().take(12)
+                    val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "HOME=/data/local/tmp LD_LIBRARY_PATH=" + binDir + " " + g + " -C " + BACKUP_DIR + " rev-parse HEAD"))
+                    val hash = p.inputStream.bufferedReader().readText().trim().take(12)
                     if (hash.isNotEmpty() && hash != "HEAD") state.put("gitCommit", hash)
                 } catch (_: Exception) {}
                 val tmpState = File(filesDirForWrite(), "db_state_${userDir.name}.json")
                 tmpState.writeText(state.toString())
-                su("cp \"${tmpState.absolutePath}\" \"${File(userDir, DB_STATE_FILE).absolutePath}\" && chmod 664 \"${File(userDir, DB_STATE_FILE).absolutePath}\"")
+                Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmpState.absolutePath}\" \"${File(userDir, DB_STATE_FILE).absolutePath}\" && chmod 664 \"${File(userDir, DB_STATE_FILE).absolutePath}\"")).waitFor()
                 results.add("${userDir.name}: rowId=${state.optLong("lastMessageRowId", 0)} incr=${incrFiles.size} git=${state.optString("gitCommit", "-")}")
             }
             val sorted = (0 until rebuiltRecords.length()).map { rebuiltRecords.getJSONObject(it) }.sortedBy { it.optLong("time", 0L) }
             val outArr = JSONArray(); for (rec in sorted) outArr.put(rec)
             val tmpRecords = File(filesDirForWrite(), RECORDS_FILE)
             tmpRecords.writeText(outArr.toString())
-            su("cp \"${tmpRecords.absolutePath}\" \"${File(BACKUP_DIR, RECORDS_FILE).absolutePath}\" && chmod 664 \"${File(BACKUP_DIR, RECORDS_FILE).absolutePath}\"")
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmpRecords.absolutePath}\" \"${File(BACKUP_DIR, RECORDS_FILE).absolutePath}\" && chmod 664 \"${File(BACKUP_DIR, RECORDS_FILE).absolutePath}\"")).waitFor()
             results.joinToString("\n") + "\nrecords=" + sorted.size
         } catch (e: Exception) {
             "重建失败: ${e.message}"
