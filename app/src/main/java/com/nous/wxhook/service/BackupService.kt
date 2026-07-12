@@ -9,6 +9,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.nous.wxhook.rootbridge.RootCommandRunner
 import com.nous.wxhook.ui.module.BackupHookLocal
 import java.io.File
 import java.text.SimpleDateFormat
@@ -92,12 +93,7 @@ class BackupService : Service() {
     }
 
     private fun runSu(cmd: String): String {
-        return try {
-            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            val out = p.inputStream.bufferedReader().readText().trim()
-            p.waitFor()
-            out
-        } catch (_: Exception) { "" }
+        return RootCommandRunner.runSuQuiet(cmd)
     }
 
     private fun createNotification(text: String): Notification {

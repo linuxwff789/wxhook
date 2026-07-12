@@ -2,6 +2,7 @@ package com.nous.wxhook.ui.module
 
 import org.json.JSONArray
 import org.json.JSONObject
+import com.nous.wxhook.rootbridge.RootCommandRunner
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -273,14 +274,8 @@ object BackupHookLocal {
     private fun gitAddAndCommit(tag: String): String {
         val g = binDir + "/git"
         val ld = "LD_LIBRARY_PATH=" + binDir
-        try {
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "HOME=/data/local/tmp " + ld + " " + g + " -C " + BACKUP_DIR + " add -A && " + ld + " " + g + " -C " + BACKUP_DIR + " commit -m 'backup: $tag' --allow-empty"))
-            proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)  // 30s timeout (FUSE is slow)
-        } catch (_: Exception) {}
-        return try {
-            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "HOME=/data/local/tmp " + ld + " " + g + " -C " + BACKUP_DIR + " rev-parse HEAD"))
-            p.inputStream.bufferedReader().readText().trim().take(12)
-        } catch (_: Exception) { "" }
+        RootCommandRunner.runSu("HOME=/data/local/tmp " + ld + " " + g + " -C " + BACKUP_DIR + " add -A && " + ld + " " + g + " -C " + BACKUP_DIR + " commit -m 'backup: $tag' --allow-empty", 30_000)
+        return RootCommandRunner.runSuQuiet("HOME=/data/local/tmp " + ld + " " + g + " -C " + BACKUP_DIR + " rev-parse HEAD").trim().take(12)
     }
 
     private fun rcloneSync(callback: ProgressCallback?) {
