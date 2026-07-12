@@ -33,6 +33,11 @@ object BackupHookLocal {
     }
     private var rcloneConfigPath = ""
     private fun filesDirForWrite() = File(filesDirPath).apply { mkdirs() }
+    private fun su(cmd: String, timeoutMs: Long = 60_000) = RootCommandRunner.runSu(cmd, timeoutMs)
+    private fun suOut(cmd: String, timeoutMs: Long = 60_000) = RootCommandRunner.runSuQuiet(cmd, timeoutMs)
+    private fun suCopy(tmp: File, dest: File, mode: String = "644") {
+        su("cp \"${tmp.absolutePath}\" \"${dest.absolutePath}\" && chmod $mode \"${dest.absolutePath}\"")
+    }
 
     interface ProgressCallback {
         fun onProgress(current: String, fileCount: Long, totalSize: Long)
@@ -412,14 +417,13 @@ object BackupHookLocal {
         val state = JSONObject().apply { put("lastBackupTag", tag); put("lastBackupTime", System.currentTimeMillis()); if (maxRowId > 0) put("lastMessageRowId", maxRowId) }
         val tmp = File(filesDirForWrite(), "db_state_${userDir.name}.json")
         tmp.writeText(state.toString())
-        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmp.absolutePath}\" \"${File(userDir, DB_STATE_FILE).absolutePath}\" && chmod 644 \"${File(userDir, DB_STATE_FILE).absolutePath}\"")).waitFor()
+        suCopy(tmp, File(userDir, DB_STATE_FILE))
     }
 
     private fun loadDbState(userDir: File): JSONObject {
         val f = File(userDir, DB_STATE_FILE)
         return try {
-            val txt = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat \"${f.absolutePath}\" 2>/dev/null"))
-                .inputStream.bufferedReader().readText().trim()
+            val txt = suOut("cat \"${f.absolutePath}\" 2>/dev/null").trim()
             if (txt.isNotEmpty()) JSONObject(txt) else JSONObject()
         } catch (e: Exception) {
             android.util.Log.e("wxhook:INCR", "loadDbState failed: $e")
@@ -436,7 +440,7 @@ object BackupHookLocal {
         if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
         val tmp = File(filesDirForWrite(), "db_state_${userDir.name}.json")
         tmp.writeText(state.toString())
-        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmp.absolutePath}\" \"${File(userDir, DB_STATE_FILE).absolutePath}\" && chmod 644 \"${File(userDir, DB_STATE_FILE).absolutePath}\"")).waitFor()
+        suCopy(tmp, File(userDir, DB_STATE_FILE))
     }
 
     // ── Helpers ──
@@ -493,26 +497,26 @@ object BackupHookLocal {
         if (!dir.exists()) dir.mkdirs()
         val f = File(dir, RECORDS_FILE)
         val arr = try {
-            val txt = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat \"${f.absolutePath}\" 2>/dev/null")).inputStream.bufferedReader().readText().trim()
+            val txt = suOut("cat \"${f.absolutePath}\" 2>/dev/null").trim()
             if (txt.isNotEmpty()) JSONArray(txt) else JSONArray()
         } catch (_: Exception) { JSONArray() }
         arr.put(record); while (arr.length() > 50) arr.remove(0)
         val tmp = File(filesDirForWrite(), RECORDS_FILE)
         tmp.writeText(arr.toString())
-        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmp.absolutePath}\" \"${f.absolutePath}\" && chmod 644 \"${f.absolutePath}\"")).waitFor()
+        suCopy(tmp, f)
     }
 
     private fun saveState(tag: String, count: Long, size: Long) {
         val state = JSONObject().apply { put("lastBackupTime", System.currentTimeMillis()); put("lastBackupTag", tag); put("fileCount", count); put("totalSize", size) }
         val tmp = File(filesDirForWrite(), STATE_FILE)
         tmp.writeText(state.toString())
-        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmp.absolutePath}\" \"${File(BACKUP_DIR, STATE_FILE).absolutePath}\" && chmod 644 \"${File(BACKUP_DIR, STATE_FILE).absolutePath}\"")).waitFor()
+        suCopy(tmp, File(BACKUP_DIR, STATE_FILE))
     }
 
     private fun loadState(): JSONObject {
         val f = File(BACKUP_DIR, STATE_FILE)
         return try {
-            val txt = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat \"${f.absolutePath}\" 2>/dev/null")).inputStream.bufferedReader().readText().trim()
+            val txt = suOut("cat \"${f.absolutePath}\" 2>/dev/null").trim()
             if (txt.isNotEmpty()) JSONObject(txt) else JSONObject()
         } catch (_: Exception) { JSONObject() }
     }
@@ -521,7 +525,7 @@ object BackupHookLocal {
         val config = JSONObject().apply { put("password", getDbPassword()); put("savedAt", System.currentTimeMillis()) }
         val tmp = File(filesDirForWrite(), DB_CONFIG_FILE)
         tmp.writeText(config.toString())
-        Runtime.getRuntime().exec(arrayOf("su", "-c", "cp \"${tmp.absolutePath}\" \"${File(BACKUP_DIR, DB_CONFIG_FILE).absolutePath}\" && chmod 644 \"${File(BACKUP_DIR, DB_CONFIG_FILE).absolutePath}\"")).waitFor()
+        suCopy(tmp, File(BACKUP_DIR, DB_CONFIG_FILE))
     }
 
     fun rebuildDbState(): String {
