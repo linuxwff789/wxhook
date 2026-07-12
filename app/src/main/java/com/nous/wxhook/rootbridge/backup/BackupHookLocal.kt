@@ -280,8 +280,11 @@ object BackupHookLocal {
     private fun gitAddAndCommit(tag: String): String {
         val g = binDir + "/git"
         val ld = "LD_LIBRARY_PATH=" + binDir
-        RootCommandRunner.runSu("HOME=/data/local/tmp " + ld + " " + g + " -C " + BACKUP_DIR + " add -A && " + ld + " " + g + " -C " + BACKUP_DIR + " commit -m 'backup: $tag' --allow-empty", 30_000)
-        return RootCommandRunner.runSuQuiet("HOME=/data/local/tmp " + ld + " " + g + " -C " + BACKUP_DIR + " rev-parse HEAD").trim().take(12)
+        val env = "HOME=/data/local/tmp " + ld + " " + g + " -C \"" + BACKUP_DIR + "\""
+        RootCommandRunner.runSu("$env init 2>/dev/null")
+        RootCommandRunner.runSu("$env add -A 2>/dev/null")
+        RootCommandRunner.runSu("$env commit -m \"" + tag + "\" --allow-empty 2>/dev/null", 30_000)
+        return RootCommandRunner.runSuQuiet("$env rev-parse HEAD 2>/dev/null").trim().take(12)
     }
 
     private fun rcloneSync(callback: ProgressCallback?) {
