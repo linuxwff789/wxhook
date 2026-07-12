@@ -390,12 +390,13 @@ object BackupHookLocal {
         val finalDir = "/sdcard/Download/wxhook_backup/tmp"
         val workDir = "/data/local/tmp/wxhook_backup"
         val workDb = "$workDir/wxhook_inc.db"
+        val workSql = "$workDir/wxhook_inc_out.sql"
         val workOut = "$workDir/wxhook_inc_out.sql.gz"
         val finalOut = "$finalDir/wxhook_inc_out.sql.gz"
         return try {
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
-            val cleanupWork = "rm -f $workDb $workDb-shm $workDb-wal $workOut 2>/dev/null"
+            val cleanupWork = "rm -f $workDb $workDb-shm $workDb-wal $workSql $workOut 2>/dev/null"
             val cleanupAll = "$cleanupWork; rm -f $finalOut 2>/dev/null"
             Runtime.getRuntime().exec(arrayOf("su", "-c", "killall sqlcipher 2>/dev/null; mkdir -p $workDir; $cleanupAll")).waitFor()
 
@@ -417,15 +418,25 @@ object BackupHookLocal {
                 "-cmd '.output stdout' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > $lastRowId;' " +
-                "2>/dev/null | gzip -c > \"$workOut\""
+                "> \"$workSql\" 2>/dev/null"
             val query = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
             val queryFinished = query.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
             if (!queryFinished) {
                 query.destroyForcibly()
                 Runtime.getRuntime().exec(arrayOf("su", "-c", "killall sqlcipher 2>/dev/null")).waitFor()
+                Runtime.getRuntime().exec(arrayOf("su", "-c", cleanupWork)).waitFor()
+                return ""
             }
+            val sqlSize = RootCommandRunner.runSuQuiet("stat -c %s \"$workSql\" 2>/dev/null").trim().toLongOrNull() ?: 0L
+            if (query.exitValue() != 0 || sqlSize <= 0L) {
+                Runtime.getRuntime().exec(arrayOf("su", "-c", cleanupWork)).waitFor()
+                return ""
+            }
+            val gzip = Runtime.getRuntime().exec(arrayOf("su", "-c", "gzip -c \"$workSql\" > \"$workOut\""))
+            val gzipFinished = gzip.waitFor(120, java.util.concurrent.TimeUnit.SECONDS)
+            if (!gzipFinished) gzip.destroyForcibly()
             val outputSize = RootCommandRunner.runSuQuiet("stat -c %s \"$workOut\" 2>/dev/null").trim().toLongOrNull() ?: 0L
-            if (!queryFinished || outputSize <= 0L) {
+            if (!gzipFinished || gzip.exitValue() != 0 || outputSize <= 0L) {
                 Runtime.getRuntime().exec(arrayOf("su", "-c", cleanupWork)).waitFor()
                 return ""
             }
