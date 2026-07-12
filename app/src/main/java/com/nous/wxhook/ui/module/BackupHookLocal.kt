@@ -382,14 +382,11 @@ object BackupHookLocal {
     }
     private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
-        val shPath = "/data/local/tmp/decrypt_inc.sh"
-        val doneFile = "$tmpDir/decrypt_inc_done.txt"
-        val outFile = "$tmpDir/wxhook_inc_out.sql"
+        val outFile = "$tmpDir/wxhook_inc_out.sql.gz"
         return try {
             val pwd = getDbPassword()
-            val script = ("#!/system/bin/sh\n" +
-                "mkdir -p $tmpDir\n" +
-                "cp \"" + dbPath + "\" $tmpDir/wxhook_inc.db 2>/dev/null\n" +
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $tmpDir && cp \"" + dbPath + "\" $tmpDir/wxhook_inc.db 2>/dev/null")).waitFor()
+            val decCmd =
                 "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
                 "${binDir}/sqlcipher $tmpDir/wxhook_inc.db " +
                 "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
@@ -399,15 +396,13 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
-                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > $outFile.gz\n" +
-                "date > " + doneFile + "\n")
-            val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")).waitFor()
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "sh $shPath > /data/local/tmp/decrypt_exec.log 2>&1"))
+                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > $outFile"
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", decCmd + " > /data/local/tmp/decrypt_exec.log 2>&1"))
             proc.waitFor()
-            val gzFile = "$outFile.gz"
-            val gz = java.io.File(gzFile)
-            if (gz.exists() && gz.length() > 0) return "OK:$gzFile"
+            android.util.Log.e("wxhook:Backup", "decryptIncremental rc=${proc.exitValue()}")
+            val gz = java.io.File(outFile)
+            if (gz.exists() && gz.length() > 0) return "OK:$outFile"
+            android.util.Log.e("wxhook:Backup", "decryptIncremental no output: $outFile size=" + if (gz.exists()) gz.length() else -1)
             ""
         } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptIncremental: $e"); "" }
     }
