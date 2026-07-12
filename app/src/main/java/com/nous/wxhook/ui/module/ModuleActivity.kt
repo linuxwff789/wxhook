@@ -210,18 +210,11 @@ class ModuleActivity : AppCompatActivity() {
         root.addView(makeCardTitle("💾 备份"))
         val backupCard = makeCard()
 
-        // 压缩开关
-        val compressRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(12), dp(8), dp(12), dp(4)); gravity = Gravity.CENTER_VERTICAL }
-        compressRow.addView(TextView(this).apply { text = "压缩备份 (gzip)"; textSize = 14f; layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) })
-        val compressSwitch = Switch(this).apply { isChecked = true }
-        compressRow.addView(compressSwitch)
-        backupCard.addView(compressRow)
-
         backupBtn = Button(this).apply {
             text = "全量备份 (DB + 附件)"
             setOnClickListener {
                 android.util.Log.e("wxhook:CLICK", "full backup clicked")
-                doBackup(false, compressSwitch.isChecked)
+                doBackup(false)
             }
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(12), dp(8), dp(12), dp(4)) }
         }
@@ -231,7 +224,7 @@ class ModuleActivity : AppCompatActivity() {
             text = "增量备份 (仅新文件)"
             setOnClickListener {
                 android.util.Log.e("wxhook:CLICK", "incremental backup clicked")
-                doBackup(true, compressSwitch.isChecked)
+                doBackup(true)
             }
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(12), dp(4), dp(12), dp(8)) }
         }
@@ -264,8 +257,8 @@ class ModuleActivity : AppCompatActivity() {
         setContentView(sv)
     }
 
-    private fun doBackup(incremental: Boolean, compress: Boolean = true) {
-        android.util.Log.e("wxhook:CLICK", "doBackup incremental=$incremental compress=$compress")
+    private fun doBackup(incremental: Boolean) {
+        android.util.Log.e("wxhook:CLICK", "doBackup incremental=$incremental")
         val btn = if (incremental) incrBtn else backupBtn
         if (isBackingUp) { log("⏳ 正在备份中..."); return }
         isBackingUp = true
