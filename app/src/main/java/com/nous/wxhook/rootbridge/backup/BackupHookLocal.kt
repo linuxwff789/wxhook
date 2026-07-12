@@ -377,6 +377,8 @@ object BackupHookLocal {
     }
     private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
+        val outSql = "$tmpDir/wxhook_inc_out.sql"
+        val outGz = "$outSql.gz"
         return try {
             val pwd = getDbPassword()
             su("mkdir -p $tmpDir && cp \"" + dbPath + "\" $tmpDir/wxhook_inc.db 2>/dev/null")
@@ -390,24 +392,17 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
-                "2>/dev/null"
+                "2>/dev/null > $outSql"
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
-            val rawOut = proc.inputStream.bufferedReader().readText()
             proc.waitFor()
-            if (rawOut.isBlank()) return ""
-            val compressed = java.io.ByteArrayOutputStream()
+            val sqlFile = java.io.File(outSql)
+            if (!sqlFile.exists() || sqlFile.length() == 0L) return ""
             if (useZstd()) {
-                val zstd = Runtime.getRuntime().exec(arrayOf("su", "-c", "${binDir}/zstd -c -3"))
-                zstd.outputStream.write(rawOut.toByteArray(java.nio.charset.StandardCharsets.UTF_8))
-                zstd.outputStream.close()
-                compressed.write(zstd.inputStream.readBytes())
-                zstd.waitFor()
+                su("${binDir}/zstd -c -3 \"$outSql\" > \"$outGz\" && chmod 644 \"$outGz\" && rm -f \"$outSql\"")
             } else {
-                java.util.zip.GZIPOutputStream(compressed).use { it.write(rawOut.toByteArray(java.nio.charset.StandardCharsets.UTF_8)) }
+                su("gzip -c \"$outSql\" > \"$outGz\" && chmod 644 \"$outGz\" && rm -f \"$outSql\"")
             }
-            val gzFile = java.io.File("$tmpDir/wxhook_inc_out.sql.gz")
-            gzFile.writeBytes(compressed.toByteArray())
-            if (gzFile.exists() && gzFile.length() > 0) return "OK:${gzFile.absolutePath}"
+            if (java.io.File(outGz).exists() && java.io.File(outGz).length() > 0) return "OK:$outGz"
             android.util.Log.e("wxhook:Backup", "decryptIncremental output empty")
             ""
         } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptIncremental: $e"); "" }
