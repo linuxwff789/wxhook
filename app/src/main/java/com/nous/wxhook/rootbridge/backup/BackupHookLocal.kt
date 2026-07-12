@@ -379,15 +379,14 @@ object BackupHookLocal {
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
         val localDb = "$tmpDir/wxhook_inc.db"
         val outGz = "$tmpDir/wxhook_inc_out.sql.gz"
-        val stepFile = java.io.File(filesDirForWrite(), "dec_step.txt")
         return try {
-            // Write entry marker to file
-            stepFile.writeText("entry")
+            // Write entry marker via su (avoids app file permission issues)
+            su("echo entry > /data/local/tmp/dec_step2.txt")
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
-            stepFile.writeText("pwd_ok")
+            su("echo pwd_ok >> /data/local/tmp/dec_step2.txt")
             su("mkdir -p $tmpDir")
-            stepFile.writeText("mkdir_ok")
+            su("echo mkdir_ok >> /data/local/tmp/dec_step2.txt")
             // dd sequential read for /proc
             Runtime.getRuntime().exec(arrayOf("su", "-c", "dd if=\"" + dbPath + "\" of=$localDb bs=4M 2>/dev/null &"))
             var waited = 0
