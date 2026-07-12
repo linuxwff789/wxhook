@@ -379,9 +379,9 @@ object BackupHookLocal {
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
         val localDb = "$tmpDir/wxhook_inc.db"
         val outGz = "$tmpDir/wxhook_inc_out.sql.gz"
+        val stepFile = java.io.File(filesDirForWrite(), "dec_step.txt")
         return try {
-            // Write entry marker to file (Log.e may not show on all devices)
-            val stepFile = java.io.File(filesDirForWrite(), "dec_step.txt")
+            // Write entry marker to file
             stepFile.writeText("entry")
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
