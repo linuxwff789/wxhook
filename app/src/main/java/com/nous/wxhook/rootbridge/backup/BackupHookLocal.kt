@@ -377,11 +377,10 @@ object BackupHookLocal {
     }
     private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
-        val outFile = "$tmpDir/wxhook_inc_out.sql.gz"
         return try {
             val pwd = getDbPassword()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $tmpDir && cp \"" + dbPath + "\" $tmpDir/wxhook_inc.db 2>/dev/null")).waitFor()
-            val decCmd =
+            su("mkdir -p $tmpDir && cp \"" + dbPath + "\" $tmpDir/wxhook_inc.db 2>/dev/null")
+            val sqlCmd =
                 "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
                 "${binDir}/sqlcipher $tmpDir/wxhook_inc.db " +
                 "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
@@ -391,13 +390,25 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
-                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > $outFile"
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", decCmd + " > /data/local/tmp/decrypt_exec.log 2>&1"))
+                "2>/dev/null"
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
+            val rawOut = proc.inputStream.bufferedReader().readText()
             proc.waitFor()
-            android.util.Log.e("wxhook:Backup", "decryptIncremental rc=${proc.exitValue()}")
-            val gz = java.io.File(outFile)
-            if (gz.exists() && gz.length() > 0) return "OK:$outFile"
-            android.util.Log.e("wxhook:Backup", "decryptIncremental no output: $outFile size=" + if (gz.exists()) gz.length() else -1)
+            if (rawOut.isBlank()) return ""
+            val compressed = java.io.ByteArrayOutputStream()
+            if (useZstd()) {
+                val zstd = Runtime.getRuntime().exec(arrayOf("su", "-c", "${binDir}/zstd -c -3"))
+                zstd.outputStream.write(rawOut.toByteArray(java.nio.charset.StandardCharsets.UTF_8))
+                zstd.outputStream.close()
+                compressed.write(zstd.inputStream.readBytes())
+                zstd.waitFor()
+            } else {
+                java.util.zip.GZIPOutputStream(compressed).use { it.write(rawOut.toByteArray(java.nio.charset.StandardCharsets.UTF_8)) }
+            }
+            val gzFile = java.io.File("$tmpDir/wxhook_inc_out.sql.gz")
+            gzFile.writeBytes(compressed.toByteArray())
+            if (gzFile.exists() && gzFile.length() > 0) return "OK:${gzFile.absolutePath}"
+            android.util.Log.e("wxhook:Backup", "decryptIncremental output empty")
             ""
         } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptIncremental: $e"); "" }
     }
