@@ -393,6 +393,7 @@ object BackupHookLocal {
             val b64 = android.util.Base64.encodeToString(script.toByteArray(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP)
             su("printf '%s' " + b64 + " | base64 -d > $shPath && chmod 755 $shPath")
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "sh $shPath > /data/local/tmp/decrypt_exec.log 2>&1"))
+            proc.outputStream.close()
             proc.waitFor(600, java.util.concurrent.TimeUnit.SECONDS)
             if (java.io.File(gzFile).exists() && java.io.File(gzFile).length() > 0) return "OK:$gzFile"
             ""
@@ -432,6 +433,7 @@ object BackupHookLocal {
                 "-cmd 'SELECT * FROM message WHERE rowid > $lastRowId;' " +
                 "> \"$workSql\" 2>/dev/null"
             val query = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
+            query.outputStream.close()
             val queryFinished = query.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
             if (!queryFinished) {
                 query.destroyForcibly()
