@@ -194,10 +194,11 @@ object BackupHookLocal {
                             val dec = if (useZstd()) "${binDir}/zstd -dc" else "gzip -dc"
                             suOut(dec + " \"" + gzFile.absolutePath + "\" 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1").trim().toLong()
                         }.getOrDefault(lastRowId)
-                        val incrFile = File(userDir, "incr_${incrFrom}_to_${incrTo}" + ext())
-                        val ok = gzFile.renameTo(incrFile) || runCatching { suCopy(gzFile, incrFile); gzFile.delete(); incrFile.exists() }.getOrDefault(false)
-                        if (ok && backupExists(incrFile.absolutePath) && backupSize(incrFile.absolutePath) > 0) {
-                            totalFiles++; totalSize += backupSize(incrFile.absolutePath); newFiles++
+                        val incrName = "incr_${incrFrom}_to_${incrTo}" + ext()
+                        val incrPath = "${userDir.absolutePath}/$incrName"
+                        val ok = suCopyResult(gzPath, incrPath)
+                        if (ok && backupExists(incrPath) && backupSize(incrPath) > 0) {
+                            totalFiles++; totalSize += backupSize(incrPath); newFiles++
                             updateDbState(userDir, tag, incrTo.toString())
                             callback?.onProgress("[$userHash] DB增量: ${incrTo - incrFrom}条新消息", totalFiles, totalSize)
                         } else {
@@ -310,6 +311,11 @@ object BackupHookLocal {
     // ── DB incremental backup ──
 
     private var cachedPassword: String? = null
+
+    private fun suCopyResult(src: String, dest: String, mode: String = "664"): Boolean {
+        val result = su("cp \"$src\" \"$dest\" && chmod $mode \"$dest\"", 120_000)
+        return result.ok
+    }
 
     private fun backupExists(path: String): Boolean = suOut("test -e \"$path\" && echo 1").trim() == "1"
     private fun backupSize(path: String): Long = suOut("stat -c %s \"$path\" 2>/dev/null").trim().toLongOrNull() ?: 0L
@@ -565,7 +571,9 @@ object BackupHookLocal {
             if (userDirs.isEmpty()) return "备份目录为空"
             for (userPath in userDirs) {
                 val userDir = File(userPath)
+                val previousState = runCatching { JSONObject(backupRead(File(userDir, DB_STATE_FILE).absolutePath)) }.getOrDefault(JSONObject())
                 val state = JSONObject().apply { put("restoredAt", System.currentTimeMillis()) }
+                val previousRowId = previousState.optLong("lastMessageRowId", 0L)
                 val fileProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "find \"$userPath\" -maxdepth 1 -type f"))
                 val files = fileProc.inputStream.bufferedReader().readLines().map { File(it) }
                 fileProc.waitFor()
@@ -594,7 +602,8 @@ object BackupHookLocal {
                     try {
                         val p = Runtime.getRuntime().exec(arrayOf("su", "-c", dec + " \"" + lastFile.absolutePath + "\" 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
                         val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
-                        if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
+                        if (rowId != null && rowId > previousRowId) state.put("lastMessageRowId", rowId)
+                        else if (previousRowId > 0) state.put("lastMessageRowId", previousRowId)
                     } catch (_: Exception) {}
                     for (f in incrFiles) {
                         val m = Regex("incr_(\\d+)_to_(\\d+)\\.sql\\.(gz|zst)").find(f.name)
@@ -619,7 +628,8 @@ object BackupHookLocal {
                     try {
                         val p = Runtime.getRuntime().exec(arrayOf("su", "-c", dec + " \"" + baseline.absolutePath + "\" 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1"))
                         val rowId = p.inputStream.bufferedReader().readText().trim().toLongOrNull()
-                        if (rowId != null && rowId > 0) state.put("lastMessageRowId", rowId)
+                        if (rowId != null && rowId > previousRowId) state.put("lastMessageRowId", rowId)
+                        else if (previousRowId > 0) state.put("lastMessageRowId", previousRowId)
                     } catch (_: Exception) {}
                 }
                 try {
