@@ -19,7 +19,6 @@ import android.widget.Switch
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.nous.wxhook.db.BackupManager
-import com.nous.wxhook.rootbridge.RootCommandRunner
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -234,7 +233,9 @@ class ModuleActivity : AppCompatActivity() {
         // Load persisted live log first
         Thread {
             try {
-                val txt = RootCommandRunner.runSuQuiet("tail -50 /sdcard/Download/wxhook_backup/backup_live.log 2>/dev/null")
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "tail -50 /sdcard/Download/wxhook_backup/backup_live.log 2>/dev/null"))
+                val txt = p.inputStream.bufferedReader().readText().trim()
+                p.waitFor()
                 if (txt.isNotEmpty()) handler.post { logView.text = txt }
             } catch (_: Exception) {}
         }.start()
@@ -321,11 +322,13 @@ class ModuleActivity : AppCompatActivity() {
 
             // 1. Root 检测
             try {
-                val output = RootCommandRunner.runSuQuiet("id")
-                if (output.contains("uid=0")) {
+                val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+                val output = proc.inputStream.bufferedReader().readText().trim()
+                val exit = proc.waitFor()
+                if (exit == 0 && output.contains("uid=0")) {
                     sb.appendLine("✅ Root: 正常 (${output})")
                 } else {
-                    sb.appendLine("❌ Root: 失败 (${output})")
+                    sb.appendLine("❌ Root: 失败 (exit=$exit)")
                 }
             } catch (e: Exception) {
                 sb.appendLine("❌ Root: 异常 (${e.message})")
@@ -333,8 +336,11 @@ class ModuleActivity : AppCompatActivity() {
 
             // 2. Xposed 模块检测
             try {
+                // 检查 Xposed 模块包是否存在
                 val xpPkg = "com.nous.wxhook.xposed"
-                val xpOutput = RootCommandRunner.runSuQuiet("pm list packages | grep $xpPkg")
+                val xpProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "pm list packages | grep $xpPkg"))
+                val xpOutput = xpProc.inputStream.bufferedReader().readText().trim()
+                xpProc.waitFor()
                 if (xpOutput.contains(xpPkg)) {
                     sb.appendLine("✅ Xposed 模块: 已安装")
                 } else {
@@ -342,7 +348,9 @@ class ModuleActivity : AppCompatActivity() {
                 }
 
                 // 检查 LSPosed 是否加载了模块
-                val lsOutput = RootCommandRunner.runSuQuiet("ls /data/adb/lspd/modules/")
+                val lsProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "ls /data/adb/lspd/modules/"))
+                val lsOutput = lsProc.inputStream.bufferedReader().readText().trim()
+                lsProc.waitFor()
                 if (lsOutput.contains("wxhook")) {
                     sb.appendLine("✅ LSPosed: 模块已注册")
                 } else {
@@ -350,7 +358,9 @@ class ModuleActivity : AppCompatActivity() {
                 }
 
                 // 检查 Xposed 日志
-                val logOutput = RootCommandRunner.runSuQuiet("logcat -d | grep 'wxhook:Hook' | tail -1")
+                val logProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "logcat -d | grep 'wxhook:Hook' | tail -1"))
+                val logOutput = logProc.inputStream.bufferedReader().readText().trim()
+                logProc.waitFor()
                 if (logOutput.isNotEmpty()) {
                     sb.appendLine("✅ Xposed Hook: 已加载")
                     sb.appendLine("   $logOutput")
@@ -363,7 +373,9 @@ class ModuleActivity : AppCompatActivity() {
 
             // 3. 微信进程检测
             try {
-                val pid = RootCommandRunner.runSuQuiet("pidof com.tencent.mm")
+                val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "pidof com.tencent.mm"))
+                val pid = proc.inputStream.bufferedReader().readText().trim()
+                proc.waitFor()
                 if (pid.isNotEmpty()) {
                     sb.appendLine("✅ 微信: 运行中 (pid=$pid)")
                 } else {
@@ -431,7 +443,7 @@ class ModuleActivity : AppCompatActivity() {
         try {
             val tmp = File(filesDir, "backup_live.log")
             tmp.appendText(line + "\n")
-            RootCommandRunner.runSu("mkdir -p /sdcard/Download/wxhook_backup && cat \"${tmp.absolutePath}\" >> /sdcard/Download/wxhook_backup/backup_live.log && chmod 644 /sdcard/Download/wxhook_backup/backup_live.log")
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p /sdcard/Download/wxhook_backup && cat \"${tmp.absolutePath}\" >> /sdcard/Download/wxhook_backup/backup_live.log && chmod 644 /sdcard/Download/wxhook_backup/backup_live.log")).waitFor()
             tmp.writeText("")
         } catch (_: Exception) {}
     }
