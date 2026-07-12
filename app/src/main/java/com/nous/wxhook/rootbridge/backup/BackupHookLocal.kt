@@ -193,8 +193,9 @@ object BackupHookLocal {
                             suOut(dec + " \"" + gzFile.absolutePath + "\" 2>/dev/null | tail -1 | cut -d'(' -f2 | cut -d',' -f1").trim().toLong()
                         }.getOrDefault(lastRowId)
                         val incrFile = File(userDir, "incr_${incrFrom}_to_${incrTo}" + ext())
-                        val renamed = gzFile.renameTo(incrFile)
-                        if (renamed && incrFile.exists() && incrFile.length() > 0) {
+                        suCopy(gzFile, incrFile)
+                        gzFile.delete()
+                        if (incrFile.exists() && incrFile.length() > 0) {
                             totalFiles++; totalSize += incrFile.length(); newFiles++
                             updateDbState(userDir, tag, incrTo.toString())
                             callback?.onProgress("[$userHash] DB增量: ${incrTo - incrFrom}条新消息", totalFiles, totalSize)
