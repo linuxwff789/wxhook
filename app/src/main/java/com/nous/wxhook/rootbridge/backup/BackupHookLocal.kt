@@ -312,15 +312,8 @@ object BackupHookLocal {
 
     private var cachedPassword: String? = null
 
-    private fun ext() = if (useZstd()) ".sql.zst" else ".sql.gz"
-
-    private fun useZstd(): Boolean {
-        try {
-            val cfg = java.io.File("/sdcard/Download/wxhook_backup/db_config.json")
-            if (cfg.exists()) return JSONObject(cfg.readText()).optBoolean("zstd", false)
-        } catch (_: Exception) {}
-        return false
-    }
+    private fun ext() = ".sql.gz"
+    private fun useZstd() = false
 
     private fun getDbPassword(): String {
         if (cachedPassword != null) return cachedPassword!!
