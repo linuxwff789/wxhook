@@ -370,27 +370,14 @@ object BackupHookLocal {
     }
     private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
         val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
-        val localDb = "$tmpDir/wxhook_inc.db"
         val outGz = "$tmpDir/wxhook_inc_out.sql.gz"
         return try {
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
-            // Clean up and dd via direct exec (dir exists, created by init mkdirs)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "killall sqlcipher 2>/dev/null; rm -f $localDb $tmpDir/wxhook_inc.db-shm $tmpDir/wxhook_inc.db-wal $outGz 2>/dev/null")).waitFor()
-            val ddProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "dd if=\"" + dbPath + "\" of=$localDb bs=4M 2>/dev/null"))
-            ddProc.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
-            if (java.io.File(localDb).length() < 1000000) return ""
-            // WAL recovery for inconsistent copy (WeChat writes during dd)
-            val walCmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
-                "${binDir}/sqlcipher $localDb " +
-                "-cmd 'PRAGMA key = \"" + pwd + "\";' -cmd 'PRAGMA cipher_compatibility = 3;' " +
-                "-cmd 'PRAGMA cipher_page_size = 1024;' -cmd 'PRAGMA kdf_iter = 4000;' " +
-                "-cmd 'PRAGMA cipher_use_hmac = OFF;' -cmd 'PRAGMA wal_checkpoint(TRUNCATE);' " +
-                "2>/dev/null"
-            Runtime.getRuntime().exec(arrayOf("su", "-c", walCmd)).waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
-            if (java.io.File(localDb).length() < 1000000) return ""
+            // Clean old output (no DB copy - sqlcipher works directly on /proc path)
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f $outGz 2>/dev/null")).waitFor()
             val sqlCmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
-                "${binDir}/sqlcipher $localDb " +
+                "${binDir}/sqlcipher \"" + dbPath + "\" " +
                 "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
                 "-cmd 'PRAGMA cipher_page_size = 1024;' " +
@@ -398,10 +385,9 @@ object BackupHookLocal {
                 "-cmd 'PRAGMA cipher_use_hmac = OFF;' " +
                 "-cmd '.mode insert' " +
                 "-cmd 'SELECT * FROM message WHERE rowid > " + lastRowId + ";' " +
-                "2>/dev/null | " + (if (useZstd()) "${binDir}/zstd -c -3" else "gzip -c") + " > \"" + outGz + "\""
+                "2>/dev/null | gzip -c > \"" + outGz + "\""
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", sqlCmd))
             proc.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)
-            su("rm -f $localDb 2>/dev/null")
             if (java.io.File(outGz).exists() && java.io.File(outGz).length() > 0) return "OK:$outGz"
             ""
         } catch (e: Exception) { "" }
