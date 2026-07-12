@@ -47,9 +47,7 @@ PRAGMA cipher_use_hmac=OFF;
         val sqlFile = File("/data/local/tmp/_mg_sql_$tag.sql")
         sqlFile.writeText(prg(key) + sql)
         try {
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
-                "$SQLCIPHER '$dbPath' < '${sqlFile.absolutePath}' 2>/dev/null | tail -1"))
-            val out = out.trim()
+            val out = RootCommandRunner.runSuQuiet("$SQLCIPHER '$dbPath' < '${sqlFile.absolutePath}' 2>/dev/null | tail -1").trim()
             return out
         } finally { sqlFile.delete() }
     }
@@ -90,8 +88,7 @@ PRAGMA cipher_use_hmac=OFF;
 .output '${dumpFile.absolutePath}'
 SELECT * FROM message;
 """.trimIndent())
-            val dumpProc = Runtime.getRuntime().exec(arrayOf("su", "-c",
-                "$SQLCIPHER '$overlayDbPath' < '${dumpSqlFile.absolutePath}' 2>/dev/null "))
+            RootCommandRunner.runSu("$SQLCIPHER '$overlayDbPath' < '${dumpSqlFile.absolutePath}' 2>/dev/null")
             dumpSqlFile.delete()
 
             if (!dumpFile.exists() || dumpFile.length() < 10L) {
@@ -116,10 +113,7 @@ SELECT * FROM message;
             val runSqlFile = File("/data/local/tmp/_mg_run_$tag.sql")
             runSqlFile.writeText(prg(config.key) + ".read '${iorFile.absolutePath}'\nSELECT changes();")
             val changes = try {
-                val proc = Runtime.getRuntime().exec(arrayOf("su", "-c",
-                    "$SQLCIPHER '$outputPath' < '${runSqlFile.absolutePath}' 2>/dev/null | tail -1"))
-                val out = out.trim()
-                proc.waitFor()
+                val out = RootCommandRunner.runSuQuiet("$SQLCIPHER '$outputPath' < '${runSqlFile.absolutePath}' 2>/dev/null | tail -1").trim()
                 out.toLongOrNull() ?: 0L
             } catch (e: Exception) { 0L }
 
