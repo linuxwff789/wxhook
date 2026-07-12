@@ -42,9 +42,8 @@ class ModuleActivity : AppCompatActivity() {
                 isBackingUp = false
                 backupBtn.isEnabled = true; incrBtn.isEnabled = true
                 backupBtn.text = "全量备份 (DB + 附件)"; incrBtn.text = "增量备份 (仅新文件)"
-            }
-        }
-    }
+                isBackingUp = false
+                backupBtn.isEnabled = true; incrBtn.isEnabled = true
                 backupBtn.text = "全量备份 (DB + 附件)"; incrBtn.text = "增量备份 (仅新文件)"
             }
         }
@@ -58,6 +57,12 @@ class ModuleActivity : AppCompatActivity() {
         com.nous.wxhook.rootbridge.backup.BackupHookLocal.init(this)
         android.util.Log.e("wxhook:startup", "3")
         registerReceiver(backupFinishReceiver, android.content.IntentFilter(com.nous.wxhook.service.BackupService.ACTION_FINISH), RECEIVER_NOT_EXPORTED)
+        // Request notification permission on Android 13+
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            try {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
+            } catch (_: Exception) {}
+        }
 
         // Request notification permission on Android 13+
         if (android.os.Build.VERSION.SDK_INT >= 33) {
