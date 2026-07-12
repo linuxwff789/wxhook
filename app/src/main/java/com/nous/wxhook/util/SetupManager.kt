@@ -1,6 +1,7 @@
 package com.nous.wxhook.util
 
 import android.content.Context
+import com.nous.wxhook.rootbridge.RootCommandRunner
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.Executors
