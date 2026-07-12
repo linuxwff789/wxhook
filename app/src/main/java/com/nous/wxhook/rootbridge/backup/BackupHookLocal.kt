@@ -21,7 +21,7 @@ object BackupHookLocal {
     private const val DB_CONFIG_FILE = "db_config.json"
     private const val DB_STATE_FILE = "db_state.json"
     private const val RCLONE_REMOTE = "gdrive:wxhook-backup"
-    private const val BACKUP_DIR = "/sdcard/Download/wxhook_backup"
+    private var BACKUP_DIR = "/sdcard/Download/wxhook_backup"
     private var binDir = "/data/data/com.termux/files/usr/bin"
     private var filesDirPath = "/data/local/tmp"
     val binPath: String get() = binDir
@@ -29,6 +29,7 @@ object BackupHookLocal {
     fun init(ctx: android.content.Context) {
         binDir = "/data/local/tmp/wxhook_bin"
         filesDirPath = ctx.filesDir.absolutePath
+        BACKUP_DIR = ctx.getExternalFilesDir(null)?.absolutePath + "/backup" ?: BACKUP_DIR
         rcloneConfigPath = ctx.filesDir.absolutePath + "/.config/rclone/rclone.conf"
     }
     private var rcloneConfigPath = ""
@@ -376,7 +377,7 @@ object BackupHookLocal {
         } catch (e: Exception) { android.util.Log.e("wxhook:Backup", "decryptAndDump: $e"); "" }
     }
     private fun decryptIncremental(dbPath: String, lastRowId: Long): String {
-        val tmpDir = "/sdcard/Download/wxhook_backup/tmp"
+        val tmpDir = "/data/local/tmp"
         val localDb = "$tmpDir/wxhook_inc.db"
         val outGz = "$tmpDir/wxhook_inc_out.sql.gz"
         return try {
@@ -385,8 +386,7 @@ object BackupHookLocal {
             val pwd = getDbPassword()
             if (pwd.isEmpty()) return ""
             su("echo pwd_ok >> /data/local/tmp/dec_step2.txt")
-            // mkdir via direct exec (avoid RootCommandRunner threading issue)
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "mkdir -p $tmpDir 2>/dev/null")).waitFor()
+            // /data/local/tmp already exists, no mkdir needed
             su("echo mkdir_ok >> /data/local/tmp/dec_step2.txt")
             // dd sequential read for /proc
             Runtime.getRuntime().exec(arrayOf("su", "-c", "dd if=\"" + dbPath + "\" of=$localDb bs=4M 2>/dev/null &"))
