@@ -31,6 +31,18 @@ object BackupHookLocal {
         filesDirPath = ctx.filesDir.absolutePath
         BACKUP_DIR = ctx.getExternalFilesDir(null)?.absolutePath + "/backup" ?: BACKUP_DIR
         rcloneConfigPath = ctx.filesDir.absolutePath + "/.config/rclone/rclone.conf"
+        // Fix ownership of backup files (survives reinstall UID changes)
+        try {
+            val myUid = android.os.Process.myUid()
+            val dir = java.io.File(BACKUP_DIR)
+            if (dir.exists()) {
+                val ownerUid = suOut("stat -c '%u' \"" + BACKUP_DIR + "\" 2>/dev/null").trim()
+                if (ownerUid.isNotEmpty() && ownerUid != myUid.toString()) {
+                    su("chown -R " + myUid + ":media_rw \"" + BACKUP_DIR + "\" 2>/dev/null")
+                    android.util.Log.i("wxhook:init", "fixed backup dir ownership: " + ownerUid + " -> " + myUid)
+                }
+            }
+        } catch (_: Exception) {}
     }
     private var rcloneConfigPath = ""
     private fun filesDirForWrite() = File(filesDirPath).apply { mkdirs() }
