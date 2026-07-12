@@ -46,9 +46,10 @@ class BackupService : Service() {
     }
 
     private fun startBackup(incremental: Boolean) {
+        // startForeground MUST be on main thread, else system kills the app
+        try { startForeground(NOTIFICATION_ID, createNotification(if (incremental) "增量备份中..." else "全量备份中...")) } catch (_: Exception) {}
         Thread {
             try {
-                try { startForeground(NOTIFICATION_ID, createNotification(if (incremental) "增量备份中..." else "全量备份中...")) } catch (_: Exception) {}
                 BackupHookLocal.init(this)
                 appendLog("服务启动: " + if (incremental) "增量备份" else "全量备份")
                 updateNotification("前台服务已启动，开始前置检查")
