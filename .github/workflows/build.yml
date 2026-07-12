@@ -31,38 +31,23 @@ jobs:
       - name: Download pre-built rclone
         run: |
           mkdir -p app/src/main/assets/bin
-          # rclone v1.69.2 pre-built for android arm64
-          curl -sL "https://github.com/rclone/rclone/releases/download/v1.69.2/rclone-v1.69.2-android-arm64.zip" -o /tmp/rclone.zip
-          file /tmp/rclone.zip
-          if ! unzip -j /tmp/rclone.zip "*/rclone" -d app/src/main/assets/bin/ 2>/dev/null; then
-            # Fallback: download raw binary from rclone build
-            curl -sL "https://downloads.rclone.org/v1.69.2/rclone-v1.69.2-linux-arm64.zip" -o /tmp/rclone_linux.zip
-            unzip -j /tmp/rclone_linux.zip "*/rclone" -d app/src/main/assets/bin/
-          fi
-          if [ ! -f app/src/main/assets/bin/rclone ]; then
-            # Last resort: use the already-committed binary in repo
-            cp app/src/main/assets/bin/rclone app/src/main/assets/bin/rclone 2>/dev/null || true
-          fi
-          chmod +x app/src/main/assets/bin/rclone 2>/dev/null || true
-          ls -lh app/src/main/assets/bin/rclone || echo "rclone binary MISSING"
+          # Use linux arm64 build (rclone is pure Go, no C deps)
+          curl -sL "https://github.com/rclone/rclone/releases/download/v1.69.2/rclone-v1.69.2-linux-arm64.zip" -o /tmp/rclone.zip
+          unzip -j /tmp/rclone.zip "*/rclone" -d app/src/main/assets/bin/
+          chmod +x app/src/main/assets/bin/rclone
+          ls -lh app/src/main/assets/bin/rclone
 
       - name: Download pre-built zstd
         run: |
-          # zstd 1.5.6 android arm64 binary from official release
-          curl -sL "https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6-android-arm64.zip" -o /tmp/zstd.zip || \
-            curl -sL "https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6-linux-aarch64.zip" -o /tmp/zstd.zip
-          if [ -f /tmp/zstd.zip ]; then
-            unzip -o /tmp/zstd.zip -d /tmp/zstd_extract 2>/dev/null || true
-            find /tmp/zstd_extract -name "zstd" -type f -exec cp {} app/src/main/assets/bin/zstd \;
-          fi
-          # Fallback: compile from source (fast, zstd is small)
-          if [ ! -f app/src/main/assets/bin/zstd ]; then
-            cd /tmp && curl -sL https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz | tar xz
-            cd zstd-1.5.6 && make zstd-release -j$(nproc) CC=aarch64-linux-gnu-gcc 2>/dev/null || CC="gcc -march=armv8-a" make zstd-release -j$(nproc)
-            cp programs/zstd $GITHUB_WORKSPACE/app/src/main/assets/bin/zstd
-          fi
-          chmod +x app/src/main/assets/bin/zstd
-          ls -lh app/src/main/assets/bin/zstd
+          # zstd 1.5.6 - compile from source (small, fast, no deps)
+          cd /tmp
+          curl -sL "https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz" -o zstd.tar.gz
+          tar xzf zstd.tar.gz
+          cd zstd-1.5.6
+          make zstd-release -j$(nproc) CC="gcc -O2" 2>/dev/null || CC="cc -O2" make zstd-release -j$(nproc)
+          cp programs/zstd $GITHUB_WORKSPACE/app/src/main/assets/bin/zstd
+          chmod +x $GITHUB_WORKSPACE/app/src/main/assets/bin/zstd
+          ls -lh $GITHUB_WORKSPACE/app/src/main/assets/bin/zstd
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
