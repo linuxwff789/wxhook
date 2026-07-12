@@ -379,7 +379,7 @@ object BackupHookLocal {
                 "mkdir -p $tmpDir\n" +
                 "cp \"" + dbPath + "\" $tmpDir/wxhook_dec.db 2>/dev/null\n" +
                 "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
-                "${binDir}/sqlcipher $tmpDir/wxhook_dec.db " +
+                "${binDir}/sqlcipher $tmpDir/wxhook_dec.db -batch " +
                 "-cmd '.output /dev/null' " +
                 "-cmd 'PRAGMA key = \"" + pwd + "\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
@@ -420,7 +420,7 @@ object BackupHookLocal {
             if (copiedSize < 1_000_000L) return ""
 
             val sqlCmd = "LD_PRELOAD='${binDir}/libz.so.1:${binDir}/libcrypto.so.3:${binDir}/libedit.so:${binDir}/libncursesw.so.6' " +
-                "${binDir}/sqlcipher \"$workDb\" " +
+                "${binDir}/sqlcipher \"$workDb\" -batch " +
                 "-cmd '.output /dev/null' " +
                 "-cmd 'PRAGMA key = \"$pwd\";' " +
                 "-cmd 'PRAGMA cipher_compatibility = 3;' " +
