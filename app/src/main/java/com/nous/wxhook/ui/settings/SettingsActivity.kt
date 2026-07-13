@@ -120,32 +120,11 @@ class SettingsActivity : AppCompatActivity() {
                 val parts = argsStr.split(" ")
                 if (parts.size >= 2) {
                     val name = parts[0]; val provider = parts[1]
-                    Thread {
-                        runOnUiThread { supportActionBar?.title = "设置 ⏳ 生成 $provider 配置..." }
-                        try {
-                            rcloneCfgFile.parentFile?.mkdirs()
-                            val cmdArgs = mutableListOf(BackupHookLocal.binPath + "/rclone", "config", "create", name, provider, "--config", rcloneCfgFile.absolutePath)
-                            // Add extra args (like scope=drive)
-                            for (i in 2 until parts.size) cmdArgs.add(parts[i])
-                            val proc = Runtime.getRuntime().exec(cmdArgs.toTypedArray())
-                            val out = proc.inputStream.bufferedReader().readText()
-                            proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
-                            runOnUiThread {
-                                if (rcloneCfgFile.exists() && rcloneCfgFile.readText().contains("[$name]")) {
-                                    supportActionBar?.title = "设置 ✅ $provider 配置已生成"
-                                    buildItems() // refresh
-                                } else {
-                                    supportActionBar?.title = "设置 ⚠️ $provider 需手动授权"
-                                    // Try to get the auth URL
-                                    if (out.contains("url:") || out.contains("http")) {
-                                        startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(out.lines().first { it.contains("http") }.trim())))
-                                    }
-                                }
-                            }
-                        } catch (e: Exception) {
-                            runOnUiThread { supportActionBar?.title = "设置 ❌ $provider 失败: ${e.message}" }
-                        }
-                    }.start()
+                    when (provider) {
+                        "drive" -> showDriveOAuth(name)
+                        "s3" -> showS3Dialog(name)
+                        "webdav" -> showWebdavDialog(name)
+                    }
                 }
             }
         }
@@ -169,6 +148,10 @@ class SettingsActivity : AppCompatActivity() {
                 runOnUiThread { supportActionBar?.title = "设置 ❌ 同步失败: ${e.message}" }
             }
         }.start()
+    }
+
+    private fun showDriveOAuth(name: String) {
+        // TODO: Google Drive OAuth - will implement after confirming build passes
     }
 
     private fun showS3Dialog(name: String) {
