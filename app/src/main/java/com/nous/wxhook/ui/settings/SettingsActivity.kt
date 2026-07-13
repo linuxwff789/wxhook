@@ -170,6 +170,103 @@ class SettingsActivity : AppCompatActivity() {
             }
         }.start()
     }
+
+    private fun showS3Dialog(name: String) {
+        val ctx = this
+        val col = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.VERTICAL; setPadding(40, 16, 40, 16)
+        }
+        val provLabels = listOf("AWS S3","Cloudflare R2","MinIO","阿里云OSS","腾讯COS","华为OBS","DigitalOcean","Wasabi","其他")
+        val provVals = listOf("AWS","Cloudflare","Minio","Alibaba","TencentCOS","HuaweiOBS","DigitalOcean","Wasabi","Other")
+        col.addView(android.widget.TextView(ctx).apply { text = "服务商"; textSize = 13f })
+        val pSpin = android.widget.Spinner(ctx)
+        pSpin.adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, provLabels)
+        col.addView(pSpin)
+        val ek = android.widget.EditText(ctx).apply { hint = "Access Key ID"; textSize = 14f; setSingleLine(); setPadding(0,4,0,8) }
+        val sk = android.widget.EditText(ctx).apply { hint = "Secret Access Key"; textSize = 14f; setSingleLine(); setPadding(0,4,0,8) }
+        col.addView(android.widget.TextView(ctx).apply { text = "Access Key ID"; textSize = 13f }); col.addView(ek)
+        col.addView(android.widget.TextView(ctx).apply { text = "Secret Access Key"; textSize = 13f }); col.addView(sk)
+        val allRegions = listOf("us-east-1","us-east-2","us-west-1","us-west-2","eu-west-1","eu-central-1","ap-northeast-1","ap-southeast-1","cn-north-1","oss-cn-hangzhou","oss-cn-beijing","ap-beijing","ap-guangzhou","auto","")
+        col.addView(android.widget.TextView(ctx).apply { text = "区域"; textSize = 13f })
+        val rSpin = android.widget.Spinner(ctx)
+        rSpin.adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, allRegions)
+        col.addView(rSpin)
+        col.addView(android.widget.TextView(ctx).apply { text = "Endpoint（留空自动填充）"; textSize = 13f })
+        val ep = android.widget.EditText(ctx).apply { hint = "留空自动填充"; textSize = 14f; setSingleLine(); setPadding(0,4,0,8) }
+        col.addView(ep)
+        android.app.AlertDialog.Builder(ctx).setTitle("S3 对象存储").setView(col)
+            .setPositiveButton("保存") { _, _ ->
+                val s3n = provVals[pSpin.selectedItemPosition]
+                val region = rSpin.selectedItem.toString()
+                var endpoint = ep.text.toString().trim()
+                val ak = ek.text.toString().trim(); val ask = sk.text.toString().trim()
+                if (ak.isEmpty() || ask.isEmpty()) return@setPositiveButton
+                if (endpoint.isEmpty()) {
+                    val epMap = mapOf("AWS" to "s3.$region.amazonaws.com", "Cloudflare" to "https://$region.r2.cloudflarestorage.com",
+                        "Minio" to "http://127.0.0.1:9000", "Alibaba" to "oss-$region.aliyuncs.com",
+                        "TencentCOS" to "cos.$region.myqcloud.com", "HuaweiOBS" to "obs.$region.myhuaweicloud.com",
+                        "DigitalOcean" to "$region.digitaloceanspaces.com", "Wasabi" to "s3.$region.wasabisys.com")
+                    endpoint = epMap[s3n] ?: ""
+                }
+                val sb = StringBuilder()
+                sb.appendLine("[$name]"); sb.appendLine("type = s3"); sb.appendLine("provider = $s3n")
+                sb.appendLine("access_key_id = $ak"); sb.appendLine("secret_access_key = $ask")
+                sb.appendLine("region = $region")
+                if (endpoint.isNotEmpty()) sb.appendLine("endpoint = $endpoint")
+                sb.appendLine("acl = private")
+                Thread {
+                    try {
+                        rcloneCfgFile.parentFile?.mkdirs()
+                        val existing = if (rcloneCfgFile.exists()) rcloneCfgFile.readText()+"\n" else ""
+                        rcloneCfgFile.writeText(existing+sb.toString())
+                        runOnUiThread { supportActionBar?.title = "设置 ✅ S3 已保存"; buildItems() }
+                    } catch (e: Exception) { runOnUiThread { supportActionBar?.title = "设置 ❌ ${e.message}" } }
+                }.start()
+            }.setNegativeButton("取消", null).show()
+    }
+
+    private fun showWebdavDialog(name: String) {
+        val ctx = this
+        val col = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.VERTICAL; setPadding(40, 16, 40, 16)
+        }
+        col.addView(android.widget.TextView(ctx).apply { text = "服务类型"; textSize = 13f })
+        val vSpin = android.widget.Spinner(ctx)
+        vSpin.adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, listOf("nextcloud","owncloud","sharepoint","fastmail","other"))
+        col.addView(vSpin)
+        col.addView(android.widget.TextView(ctx).apply { text = "WebDAV 地址"; textSize = 13f })
+        val urlEt = android.widget.EditText(ctx).apply { hint = "https://example.com/remote.php/dav/files/user"; textSize = 14f; setSingleLine(); setPadding(0,4,0,8) }
+        col.addView(urlEt)
+        col.addView(android.widget.TextView(ctx).apply { text = "用户名"; textSize = 13f })
+        val userEt = android.widget.EditText(ctx).apply { textSize = 14f; setSingleLine(); setPadding(0,4,0,8) }
+        col.addView(userEt)
+        col.addView(android.widget.TextView(ctx).apply { text = "密码"; textSize = 13f })
+        val passEt = android.widget.EditText(ctx).apply { textSize = 14f; setSingleLine(); setPadding(0,4,0,8) }
+        col.addView(passEt)
+        android.app.AlertDialog.Builder(ctx).setTitle("WebDAV").setView(col)
+            .setPositiveButton("保存") { _, _ ->
+                var url = urlEt.text.toString().trim()
+                val user = userEt.text.toString().trim(); val pass = passEt.text.toString().trim()
+                val vendor = vSpin.selectedItem.toString()
+                if (url.isEmpty() || user.isEmpty()) return@setPositiveButton
+                if (!url.startsWith("http")) url = "https://$url"
+                val obscured = try {
+                    val p = Runtime.getRuntime().exec(arrayOf(BackupHookLocal.binPath+"/rclone","obscure",pass))
+                    p.inputStream.bufferedReader().readText().trim()
+                } catch (_: Exception) { pass }
+                val sb = StringBuilder()
+                sb.appendLine("[$name]"); sb.appendLine("type = webdav"); sb.appendLine("url = $url")
+                sb.appendLine("vendor = $vendor"); sb.appendLine("user = $user"); sb.appendLine("pass = $obscured")
+                Thread {
+                    try {
+                        rcloneCfgFile.parentFile?.mkdirs()
+                        val existing = if (rcloneCfgFile.exists()) rcloneCfgFile.readText()+"\n" else ""
+                        rcloneCfgFile.writeText(existing+sb.toString())
+                        runOnUiThread { supportActionBar?.title = "设置 ✅ WebDAV 已保存"; buildItems() }
+                    } catch (e: Exception) { runOnUiThread { supportActionBar?.title = "设置 ❌ ${e.message}" } }
+                }.start()
+            }.setNegativeButton("取消", null).show()
+    }
 }
 
 // ── Adapter ──
