@@ -51,6 +51,7 @@ class SettingsActivity : AppCompatActivity() {
             id = View.generateViewId()
         }
         setContentView(recyclerView)
+        com.nous.wxhook.rootbridge.backup.BackupHookLocal.init(this)
         buildItems()
     }
 
