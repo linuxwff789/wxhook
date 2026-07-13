@@ -120,32 +120,82 @@ class SettingsActivity : AppCompatActivity() {
                 val parts = argsStr.split(" ")
                 if (parts.size >= 2) {
                     val name = parts[0]; val provider = parts[1]
-                    Thread {
-                        runOnUiThread { supportActionBar?.title = "设置 ⏳ 生成 $provider 配置..." }
-                        try {
-                            rcloneCfgFile.parentFile?.mkdirs()
-                            val cmdArgs = mutableListOf(BackupHookLocal.binPath + "/rclone", "config", "create", name, provider, "--config", rcloneCfgFile.absolutePath)
-                            // Add extra args (like scope=drive)
-                            for (i in 2 until parts.size) cmdArgs.add(parts[i])
-                            val proc = Runtime.getRuntime().exec(cmdArgs.toTypedArray())
-                            val out = proc.inputStream.bufferedReader().readText()
-                            proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
-                            runOnUiThread {
-                                if (rcloneCfgFile.exists() && rcloneCfgFile.readText().contains("[$name]")) {
-                                    supportActionBar?.title = "设置 ✅ $provider 配置已生成"
-                                    buildItems() // refresh
-                                } else {
-                                    supportActionBar?.title = "设置 ⚠️ $provider 需手动授权"
-                                    // Try to get the auth URL
-                                    if (out.contains("url:") || out.contains("http")) {
-                                        startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(out.lines().first { it.contains("http") }.trim())))
+                    rcloneCfgFile.parentFile?.mkdirs()
+                    val cfgPath = rcloneCfgFile.absolutePath
+                    when (provider) {
+                        "drive" -> {
+                            // Google Drive OAuth: show URL + verification code input
+                            Thread {
+                                try {
+                                    val proc = Runtime.getRuntime().exec(arrayOf(
+                                        BackupHookLocal.binPath + "/rclone", "config", "create",
+                                        name, provider, "--config", cfgPath, "scope=drive"
+                                    ))
+                                    // Read output line by line to find auth URL
+                                    val reader = java.io.BufferedReader(java.io.InputStreamReader(proc.inputStream))
+                                    val sb = StringBuilder()
+                                    var authUrl = ""
+                                    var line: String?
+                                    val deadline = System.currentTimeMillis() + 25_000
+                                    while (System.currentTimeMillis() < deadline && reader.readLine().also { line = it } != null) {
+                                        sb.appendLine(line)
+                                        if (line!!.contains("http")) authUrl = line!!.trim()
                                     }
+                                    val foundUrl = authUrl
+                                    runOnUiThread {
+                                        if (foundUrl.isNotEmpty()) {
+                                            // Open auth URL
+                                            try {
+                                                startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(foundUrl)))
+                                            } catch (_: Exception) {}
+                                            // Show dialog for verification code
+                                            val input = android.widget.EditText(this@SettingsActivity).apply {
+                                                hint = "粘贴浏览器中的授权码"
+                                                textSize = 14f
+                                                setSingleLine()
+                                            }
+                                            android.app.AlertDialog.Builder(this@SettingsActivity)
+                                                .setTitle("Google Drive 授权")
+                                                .setMessage("浏览器已打开，登录Google账号后复制授权码粘贴到此处")
+                                                .setView(input)
+                                                .setPositiveButton("完成") { _, _ ->
+                                                    val code = input.text.toString().trim()
+                                                    if (code.isNotEmpty()) {
+                                                        Thread {
+                                                            try {
+                                                                proc.outputStream.write((code + "\n").toByteArray())
+                                                                proc.outputStream.flush()
+                                                                proc.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
+                                                                runOnUiThread {
+                                                                    if (rcloneCfgFile.exists() && rcloneCfgFile.readText().contains("[$name]")) {
+                                                                        supportActionBar?.title = "设置 ✅ $provider 已配置"
+                                                                        buildItems()
+                                                                    } else {
+                                                                        supportActionBar?.title = "设置 ⚠️ 授权失败，请检查授权码"
+                                                                    }
+                                                                }
+                                                            } catch (_: Exception) {
+                                                                runOnUiThread { supportActionBar?.title = "设置 ❌ 授权失败" }
+                                                            }
+                                                        }.start()
+                                                    }
+                                                }
+                                                .setNegativeButton("取消", null)
+                                                .show()
+                                        } else {
+                                            supportActionBar?.title = "设置 ⚠️ 无法获取授权地址"
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    runOnUiThread { supportActionBar?.title = "设置 ❌ $provider 失败: ${e.message}" }
                                 }
-                            }
-                        } catch (e: Exception) {
-                            runOnUiThread { supportActionBar?.title = "设置 ❌ $provider 失败: ${e.message}" }
+                            }.start()
                         }
-                    }.start()
+                        else -> {
+                            // S3/WebDAV: show input fields dialog, write INI directly
+                            showProviderInputDialog(name, provider)
+                        }
+                    }
                 }
             }
         }
@@ -169,6 +219,81 @@ class SettingsActivity : AppCompatActivity() {
                 runOnUiThread { supportActionBar?.title = "设置 ❌ 同步失败: ${e.message}" }
             }
         }.start()
+    }
+
+    private fun showProviderInputDialog(name: String, provider: String) {
+        val fields: List<Pair<String, String>>
+        when (provider) {
+            "s3" -> fields = listOf(
+                "access_key_id" to "Access Key ID",
+                "secret_access_key" to "Secret Access Key",
+                "region" to "区域 (默认 cn-north-1)",
+                "endpoint" to "Endpoint"
+            )
+            "webdav" -> fields = listOf(
+                "url" to "WebDAV 地址",
+                "user" to "用户名",
+                "pass" to "密码"
+            )
+            else -> return
+        }
+        val ctx = this
+        val col = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(40, 16, 40, 16)
+        }
+        val editTexts = mutableListOf<android.widget.EditText>()
+        for ((key, label) in fields) {
+            col.addView(android.widget.TextView(ctx).apply { text = label; textSize = 13f })
+            val et = android.widget.EditText(ctx).apply {
+                if (key == "region") setText("cn-north-1")
+                textSize = 14f; setSingleLine()
+                setPadding(0, 4, 0, 8)
+            }
+            editTexts.add(et)
+            col.addView(et)
+        }
+        android.app.AlertDialog.Builder(ctx)
+            .setTitle(if (provider == "s3") "S3 对象存储" else "WebDAV")
+            .setView(col)
+            .setPositiveButton("保存") { _, _ ->
+                val sb = StringBuilder()
+                sb.appendLine("[$name]")
+                sb.appendLine("type = $provider")
+                for ((i, (key, _)) in fields.withIndex()) {
+                    val v = editTexts[i].text.toString().trim()
+                    if (v.isNotEmpty()) {
+                        if (key == "pass") {
+                            val obscured = try {
+                                val p = Runtime.getRuntime().exec(arrayOf(
+                                    BackupHookLocal.binPath + "/rclone", "obscure", v
+                                ))
+                                p.inputStream.bufferedReader().readText().trim()
+                            } catch (_: Exception) { v }
+                            sb.appendLine("pass = $obscured")
+                        } else sb.appendLine("$key = $v")
+                    }
+                }
+                if (provider == "s3") {
+                    sb.appendLine("provider = Other")
+                    sb.appendLine("acl = private")
+                }
+                Thread {
+                    try {
+                        rcloneCfgFile.parentFile?.mkdirs()
+                        val existing = if (rcloneCfgFile.exists()) rcloneCfgFile.readText() + "\n" else ""
+                        rcloneCfgFile.writeText(existing + sb.toString())
+                        runOnUiThread {
+                            supportActionBar?.title = "设置 ✅ $provider 配置已保存"
+                            buildItems()
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread { supportActionBar?.title = "设置 ❌ 保存失败: ${e.message}" }
+                    }
+                }.start()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 }
 
