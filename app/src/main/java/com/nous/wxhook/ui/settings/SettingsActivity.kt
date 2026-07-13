@@ -260,7 +260,7 @@ class SettingsActivity : AppCompatActivity() {
                 val sb = StringBuilder()
                 sb.appendLine("[$name]")
                 sb.appendLine("type = $provider")
-                for ((i, (key, _)) in fields.withIndex()) {
+                fields.forEachIndexed { i, (key, _) ->
                     val v = editTexts[i].text.toString().trim()
                     if (v.isNotEmpty()) {
                         if (key == "pass") {
