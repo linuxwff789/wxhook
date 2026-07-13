@@ -79,7 +79,9 @@ class SyncService : Service() {
                 updateNotification("上传中...")
                 val env = "HOME=/data/local/tmp LD_LIBRARY_PATH=$binDir SSL_CERT_DIR=/system/etc/security/cacerts"
                 val rclone = "$binDir/rclone"
-                val args = mutableListOf("$env $rclone", "copy", pkgPath, remoteStr, "--no-check-certificate", "--timeout=30s")
+                val args = mutableListOf("$env $rclone", "copy", pkgPath,
+                    if (remoteStr.contains(":")) remoteStr else "$remoteStr:",
+                    "--no-check-certificate", "--timeout=30s")
                 if (rcloneCfg.exists()) {
                     args.add("--config"); args.add(rcloneCfg.absolutePath)
                 }

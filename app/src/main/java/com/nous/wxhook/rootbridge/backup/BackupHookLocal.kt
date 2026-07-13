@@ -355,7 +355,7 @@ object BackupHookLocal {
             " --config \"$cfgPath\"" else ""
         val proc = try {
             Runtime.getRuntime().exec(arrayOf("su", "-c",
-                "$env $binDir/rclone lsd \"$remote\"$cfgFlag --no-check-certificate --timeout=15s 2>&1"))
+                "$env $binDir/rclone lsd \"$remote:\"$cfgFlag --no-check-certificate --timeout=15s 2>&1"))
         } catch (e: Exception) { return "启动失败: ${e.message}" }
         val out = try {
             proc.inputStream.bufferedReader().readText().trim()
