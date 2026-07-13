@@ -57,9 +57,9 @@ class SyncService : Service() {
                 }
                 val rcloneCfg = File(filesDir, ".config/rclone/rclone.conf")
 
-                // Package backup files
+                // Package backup files into .wxhook
                 val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-                val pkgName = "wxhook_backup_$tag.tar.gz"
+                val pkgName = "wxhook_backup_$tag.wxhook"
                 val pkgPath = "/data/local/tmp/$pkgName"
 
                 updateNotification("打包备份文件...")
@@ -69,11 +69,9 @@ class SyncService : Service() {
                 val files = RootCommandRunner.runSuQuiet(findCmd).lines().filter { it.isNotBlank() }
                 if (files.isEmpty()) { result = "无备份文件可同步"; appendLog(result); updateNotification(result); sendResult(false, result); return@Thread }
 
-                val tarCmd = files.joinToString(" ") { "\"$it\"" }
-                RootCommandRunner.runSu("tar czf \"$pkgPath\" $tarCmd 2>/dev/null", 120_000)
-                val pkgSize = RootCommandRunner.runSuQuiet("stat -c %s \"$pkgPath\" 2>/dev/null").trim().toLongOrNull() ?: 0L
-                if (pkgSize < 100L) { result = "打包失败"; appendLog(result); updateNotification(result); sendResult(false, result); return@Thread }
-                appendLog("打包完成: ${formatSize(pkgSize)}")
+                val pkgInfo = BackupPackage.create(files, pkgPath, tag, "incremental")
+                if (pkgInfo == null) { result = "打包失败"; appendLog(result); updateNotification(result); sendResult(false, result); return@Thread }
+                appendLog("打包完成: ${pkgInfo.totalSize} bytes (${pkgInfo.fileCount} files)")
 
                 // Upload
                 updateNotification("上传中...")
@@ -91,9 +89,9 @@ class SyncService : Service() {
                 if (!finished) { proc.destroyForcibly(); result = "上传超时"; appendLog(result); updateNotification(result); sendResult(false, result); return@Thread }
                 if (proc.exitValue() != 0) { result = "上传失败(exit=${proc.exitValue()})"; appendLog(result); updateNotification(result); sendResult(false, result); return@Thread }
 
-                // Cleanup
+                // Cleanup local pkg
                 RootCommandRunner.runSu("rm -f \"$pkgPath\"", 10_000)
-                result = "同步完成: $pkgName (${formatSize(pkgSize)})"
+                result = "同步完成: $pkgName (${formatSize(pkgInfo.totalSize)})"
                 appendLog(result)
                 updateNotification(result)
                 sendResult(true, result)
