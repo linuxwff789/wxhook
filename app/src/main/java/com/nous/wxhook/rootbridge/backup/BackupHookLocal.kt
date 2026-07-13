@@ -350,9 +350,11 @@ object BackupHookLocal {
 
     fun testRemoteConnection(remote: String): String {
         val env = "HOME=/data/local/tmp LD_LIBRARY_PATH=$binDir SSL_CERT_DIR=/system/etc/security/cacerts"
+        val cfgFlag = if (rcloneConfigPath.isNotEmpty() && java.io.File(rcloneConfigPath).exists())
+            " --config \"$rcloneConfigPath\"" else ""
         val proc = try {
             Runtime.getRuntime().exec(arrayOf("su", "-c",
-                "$env $binDir/rclone lsd \"$remote\" --no-check-certificate --timeout=15s 2>&1"))
+                "$env $binDir/rclone lsd \"$remote\"$cfgFlag --no-check-certificate --timeout=15s 2>&1"))
         } catch (e: Exception) { return "启动失败: ${e.message}" }
         val out = try {
             proc.inputStream.bufferedReader().readText().trim()
