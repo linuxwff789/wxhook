@@ -33,6 +33,8 @@ object BackupHookLocal {
         // Ensure backup dir exists (app process, not root)
         try { java.io.File(BACKUP_DIR).mkdirs() } catch (_: Exception) {}
         try { java.io.File("$BACKUP_DIR/tmp").mkdirs() } catch (_: Exception) {}
+        // Prevent Android MediaStore from scanning backup images
+        RootCommandRunner.runSu("touch $BACKUP_DIR/.nomedia && chmod 644 $BACKUP_DIR/.nomedia", 10_000)
     }
     private var rcloneConfigPath = ""
     private fun filesDirForWrite() = File(filesDirPath).apply { mkdirs() }
