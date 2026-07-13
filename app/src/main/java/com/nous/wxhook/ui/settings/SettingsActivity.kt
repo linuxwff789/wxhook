@@ -134,14 +134,15 @@ class SettingsActivity : AppCompatActivity() {
                     val conf = if (rcloneCfgFile.exists()) rcloneCfgFile.readText() else ""
                     val remote = conf.lines().firstOrNull { it.startsWith("[") && it != "[rclone]" }
                         ?.removeSurrounding("[", "]") ?: ""
-                    if (remote.isEmpty()) {
-                        runOnUiThread { supportActionBar?.title = "设置 ⚠️ 请先保存rclone配置"; return@Thread }
-                    }
-                    val result = BackupHookLocal.testRemoteConnection(remote)
-                    val short = result.lines().first().take(60)
-                    runOnUiThread {
-                        supportActionBar?.title = "设置 $short"
-                        android.widget.Toast.makeText(this@SettingsActivity, result, android.widget.Toast.LENGTH_LONG).show()
+                    if (remote.isNotEmpty()) {
+                        val result = BackupHookLocal.testRemoteConnection(remote)
+                        val short = result.lines().first().take(60)
+                        runOnUiThread {
+                            supportActionBar?.title = "设置 $short"
+                            android.widget.Toast.makeText(this@SettingsActivity, result, android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    } else {
+                        runOnUiThread { supportActionBar?.title = "设置 ⚠️ 请先保存rclone配置" }
                     }
                 }.start()
             }
