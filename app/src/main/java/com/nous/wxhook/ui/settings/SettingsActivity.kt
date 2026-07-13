@@ -135,7 +135,7 @@ class SettingsActivity : AppCompatActivity() {
                     val remote = conf.lines().firstOrNull { it.startsWith("[") && it != "[rclone]" }
                         ?.removeSurrounding("[", "]") ?: ""
                     if (remote.isNotEmpty()) {
-                        val result = BackupHookLocal.testRemoteConnection(remote)
+                        val result = BackupHookLocal.testRemoteConnection(remote, rcloneCfgFile.absolutePath)
                         val short = result.lines().first().take(60)
                         runOnUiThread {
                             supportActionBar?.title = "设置 $short"
