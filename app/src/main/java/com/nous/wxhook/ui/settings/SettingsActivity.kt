@@ -73,10 +73,8 @@ class SettingsActivity : AppCompatActivity() {
         // Provider quick config buttons
         val providers = listOf(
             "📦 Google Drive" to "gdrive drive scope=drive",
-            "📦 阿里云盘" to "aliyun aliyundrive",
-            "📦 OneDrive" to "onedrive onedrive",
-            "📦 天翼云盘" to "189cloud 189cloud",
-            "📦 WebDAV" to "webdav webdav url=http://demo.com user=admin"
+            "📦 WebDAV" to "webdav webdav url=http://demo.com user=admin",
+            "📦 S3 对象存储" to "s3 s3 provider=Other access_key_id= key_secret= region=cn-north-1 endpoint=http://127.0.0.1:9000 acl=private"
         )
         for ((name, args) in providers) {
             items.add(SettingsItem.Button("$name", "rclone_create::$args"))
