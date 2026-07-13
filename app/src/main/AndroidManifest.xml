@@ -76,6 +76,9 @@
         <service
             android:name=".service.BackupService"
             android:exported="false" />
+        <service
+            android:name=".service.SyncService"
+            android:exported="false" />
         <activity android:name=".ui.viewer.ImageViewerActivity" android:exported="false" />
         <service
             android:name=".ui.module.ModuleTileService"
