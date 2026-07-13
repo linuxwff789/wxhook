@@ -35,6 +35,11 @@ object BackupHookLocal {
         try { java.io.File("$BACKUP_DIR/tmp").mkdirs() } catch (_: Exception) {}
         // Prevent Android MediaStore from scanning backup images
         RootCommandRunner.runSu("touch $BACKUP_DIR/.nomedia && chmod 644 $BACKUP_DIR/.nomedia", 10_000)
+        // Fix DNS for rclone (Go resolver needs /etc/resolv.conf)
+        RootCommandRunner.runSu(
+            "mkdir -p /data/local/tmp/etc && echo 'nameserver 8.8.8.8' > /data/local/tmp/etc/resolv.conf && " +
+            "mount --bind /data/local/tmp/etc /etc 2>/dev/null; " +
+            "echo 'nameserver 8.8.4.4' >> /etc/resolv.conf 2>/dev/null", 10_000)
     }
     private var rcloneConfigPath = ""
     private fun filesDirForWrite() = File(filesDirPath).apply { mkdirs() }
@@ -308,13 +313,63 @@ object BackupHookLocal {
             val remote = config.optString("remote", "")
             if (remote.isBlank()) return
             callback?.onProgress("同步到 $remote...", 0, 0)
-            val args = mutableListOf(binDir + "/rclone", "sync", BACKUP_DIR, remote, "--update")
+            // Package DB backup files into a tar.gz
+            val tag = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val pkgName = "wxhook_backup_$tag.tar.gz"
+            val pkgPath = "/data/local/tmp/$pkgName"
+            // Find backup state files and latest incr/baseline
+            val findCmd = "find \"$BACKUP_DIR\" -maxdepth 1 -type f -name \"backup_*.json\" 2>/dev/null; " +
+                "find \"$BACKUP_DIR\" -maxdepth 2 -type f \\( -name \"*.sql.gz\" -o -name \"*.sql.zst\" -o -name \"db_state.json\" \\) 2>/dev/null"
+            val files = suOut(findCmd).lines().filter { it.isNotBlank() }
+            if (files.isEmpty()) { callback?.onProgress("无文件可同步", 0, 0); return }
+            // Create tar.gz
+            val tarCmd = files.joinToString(" ") { "\"$it\"" }
+            su("tar czf \"$pkgPath\" $tarCmd 2>/dev/null", 120_000)
+            val pkgSize = suOut("stat -c %s \"$pkgPath\" 2>/dev/null").trim().toLongOrNull() ?: 0L
+            if (pkgSize < 100L) { callback?.onProgress("打包失败", 0, 0); return }
+            callback?.onProgress("上传 $pkgName (${formatSize(pkgSize)})...", 0, pkgSize)
+            // Upload with env fix and timeout
+            val env = "HOME=/data/local/tmp LD_LIBRARY_PATH=$binDir SSL_CERT_DIR=/system/etc/security/cacerts"
+            val rclone = "$binDir/rclone"
+            val args = mutableListOf(rclone, "copy", pkgPath, remote, "--no-check-certificate", "--timeout=30s")
             if (rcloneConfigPath.isNotEmpty() && java.io.File(rcloneConfigPath).exists()) {
                 args.add("--config"); args.add(rcloneConfigPath)
             }
-            val proc = Runtime.getRuntime().exec(args.toTypedArray())
-            proc.waitFor()
-        } catch (_: Exception) {}
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "$env ${args.joinToString(" ")}"))
+            val finished = proc.waitFor(120, java.util.concurrent.TimeUnit.SECONDS)
+            proc.inputStream.bufferedReader().readText() // drain
+            if (!finished) { proc.destroyForcibly(); callback?.onProgress("同步超时", 0, 0); return }
+            if (proc.exitValue() != 0) { callback?.onProgress("同步失败(exit=${proc.exitValue()})", 0, 0); return }
+            // Cleanup local pkg
+            su("rm -f \"$pkgPath\"", 10_000)
+            callback?.onProgress("同步完成: $pkgName", 1, pkgSize)
+        } catch (e: Exception) {
+            callback?.onProgress("同步异常: ${e.message}", 0, 0)
+        }
+    }
+
+    fun testRemoteConnection(remote: String): String {
+        val env = "HOME=/data/local/tmp LD_LIBRARY_PATH=$binDir SSL_CERT_DIR=/system/etc/security/cacerts"
+        val proc = try {
+            Runtime.getRuntime().exec(arrayOf("su", "-c",
+                "$env $binDir/rclone lsd \"$remote\" --no-check-certificate --timeout=15s 2>&1"))
+        } catch (e: Exception) { return "启动失败: ${e.message}" }
+        val out = try {
+            proc.inputStream.bufferedReader().readText().trim()
+        } catch (_: Exception) { "" }
+        val finished = try { proc.waitFor(20, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { false }
+        if (!finished) { proc.destroyForcibly(); return "连接超时(15s)" }
+        if (proc.exitValue() != 0) {
+            val err = if (out.contains("certificate")) "证书错误，请检查服务端TLS配置"
+                else if (out.contains("no such host") || out.contains("lookup")) "DNS解析失败，无法连接到服务器"
+                else if (out.contains("401") || out.contains("403")) "认证失败，请检查账号密码"
+                else if (out.contains("timeout") || out.contains("refused")) "服务器无响应或被拒绝"
+                else "连接失败: ${out.lines().firstOrNull()?.take(120) ?: "未知错误"}"
+            return err
+        }
+        if (out.isBlank()) return "✅ 连接成功（远端无目录）"
+        val dirs = out.lines().filter { it.isNotBlank() }.take(10)
+        return "✅ 连接成功\n${dirs.joinToString("\n")}"
     }
 
     private fun userDir(hash: String) = hash

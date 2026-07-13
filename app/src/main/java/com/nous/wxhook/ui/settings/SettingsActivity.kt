@@ -83,6 +83,7 @@ class SettingsActivity : AppCompatActivity() {
         val rcloneConfText = if (rcloneCfgFile.exists()) rcloneCfgFile.readText() else ""
         items.add(SettingsItem.Input("自定义 rclone.conf", "rclone_conf", rcloneConfText, "也可直接粘贴配置"))
         items.add(SettingsItem.Button("保存配置", "save_rclone"))
+        items.add(SettingsItem.Button("🔍 测试连接", "test_rclone"))
 
         // ── Backup section ──
         items.add(SettingsItem.Header("📂 备份设置"))
@@ -126,6 +127,24 @@ class SettingsActivity : AppCompatActivity() {
                         "webdav" -> showWebdavDialog(name)
                     }
                 }
+            }
+            action == "test_rclone" -> {
+                Thread {
+                    runOnUiThread { supportActionBar?.title = "设置 ⏳ 测试连接中..." }
+                    // Find first remote from rclone.conf
+                    val conf = if (rcloneCfgFile.exists()) rcloneCfgFile.readText() else ""
+                    val remote = conf.lines().firstOrNull { it.startsWith("[") && it != "[rclone]" }
+                        ?.removeSurrounding("[", "]") ?: ""
+                    if (remote.isEmpty()) {
+                        runOnUiThread { supportActionBar?.title = "设置 ⚠️ 请先保存rclone配置"; return@Thread }
+                    }
+                    val result = com.nous.wxhook.rootbridge.backup.BackupHookLocal.testRemoteConnection(remote)
+                    val short = result.lines().first().take(60)
+                    runOnUiThread {
+                        supportActionBar?.title = "设置 $short"
+                        android.widget.Toast.makeText(this@SettingsActivity, result, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }.start()
             }
         }
     }
