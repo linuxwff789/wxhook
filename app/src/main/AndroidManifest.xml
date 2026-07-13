@@ -31,6 +31,7 @@
         <activity android:name=".ui.settings.SettingsActivity" android:exported="true" />
 
         <activity android:name=".ui.status.StatusActivity" android:exported="true" />
+        <activity android:name=".ui.cloud.CloudConfigActivity" android:exported="true" />
         <activity android:name=".ui.chatlist.ChatListActivity" />
         <activity android:name=".ui.chatdetail.ChatDetailActivity" />
         <activity android:name=".ui.search.SearchActivity" />
