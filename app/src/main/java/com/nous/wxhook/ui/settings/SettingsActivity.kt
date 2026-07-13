@@ -222,7 +222,159 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun showProviderInputDialog(name: String, provider: String) {
-        // TODO: temp disabled for build test
+        when (provider) {
+            "s3" -> showS3Dialog(name)
+            "webdav" -> showWebdavDialog(name)
+        }
+    }
+
+    // ── S3 providers data ──
+    private data class S3Provider(val label: String, val rcloneName: String, val regions: List<String>, val endpoints: List<String>)
+    private val s3Providers = listOf(
+        S3Provider("AWS S3", "AWS", listOf("us-east-1","us-east-2","us-west-1","us-west-2","eu-west-1","eu-central-1","ap-northeast-1","ap-southeast-1","cn-north-1"), listOf("")),
+        S3Provider("Cloudflare R2", "Cloudflare", listOf("auto"), listOf("https://<account>.r2.cloudflarestorage.com")),
+        S3Provider("MinIO", "Minio", listOf("cn-north-1"), listOf("http://127.0.0.1:9000")),
+        S3Provider("阿里云OSS", "Alibaba", listOf("oss-cn-hangzhou","oss-cn-beijing","oss-cn-shanghai","oss-cn-shenzhen","oss-cn-hongkong"), listOf("oss-$region.aliyuncs.com")),
+        S3Provider("腾讯COS", "TencentCOS", listOf("ap-beijing","ap-guangzhou","ap-shanghai","ap-hongkong"), listOf("cos.$region.myqcloud.com")),
+        S3Provider("华为OBS", "HuaweiOBS", listOf("cn-north-1","cn-east-2","cn-south-1"), listOf("obs.$region.myhuaweicloud.com")),
+        S3Provider("DigitalOcean", "DigitalOcean", listOf("sfo3","nyc3","ams3","sgp1"), listOf("$region.digitaloceanspaces.com")),
+        S3Provider("Wasabi", "Wasabi", listOf("us-east-1","us-west-1","eu-central-1"), listOf("s3.$region.wasabisys.com")),
+        S3Provider("Backblaze B2", "B2", listOf("us-west-002","us-east-001","eu-central-003"), listOf("s3.$region.backblazeb2.com")),
+        S3Provider("其他", "Other", listOf(""), listOf("")),
+    )
+    private val allRegions = s3Providers.flatMap { it.regions }.distinct().sorted()
+    private val allEndpoints = s3Providers.flatMap { it.endpoints }.distinct().sorted()
+
+    private fun showS3Dialog(name: String) {
+        val ctx = this
+        val col = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(40, 16, 40, 16)
+        }
+        // Provider spinner
+        col.addView(android.widget.TextView(ctx).apply { text = "服务商"; textSize = 13f })
+        val provLabels = s3Providers.map { it.label }
+        val pSpin = android.widget.Spinner(ctx)
+        pSpin.adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, provLabels)
+        col.addView(pSpin)
+
+        // Access Key / Secret Key
+        val ek = android.widget.EditText(ctx).apply { hint = "Access Key ID"; textSize = 14f; setSingleLine(); setPadding(0,4,0,8) }
+        val sk = android.widget.EditText(ctx).apply { hint = "Secret Access Key"; textSize = 14f; setSingleLine(); setPadding(0,4,0,8) }
+        col.addView(android.widget.TextView(ctx).apply { text = "Access Key ID"; textSize = 13f }); col.addView(ek)
+        col.addView(android.widget.TextView(ctx).apply { text = "Secret Access Key"; textSize = 13f }); col.addView(sk)
+
+        // Region spinner (dynamic based on provider)
+        col.addView(android.widget.TextView(ctx).apply { text = "区域"; textSize = 13f })
+        val rSpin = android.widget.Spinner(ctx)
+        rSpin.adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, s3Providers[0].regions)
+        col.addView(rSpin)
+
+        // Endpoint
+        col.addView(android.widget.TextView(ctx).apply { text = "Endpoint（留空自动填充）"; textSize = 13f })
+        val ep = android.widget.EditText(ctx).apply { hint = "留空自动填充"; textSize = 14f; setSingleLine(); setPadding(0,4,0,8) }
+        col.addView(ep)
+
+        // Update region/endpoint when provider changes
+        pSpin.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                val prov = s3Providers[pos]
+                val regions = if (prov.regions.size == 1 && prov.regions[0].isEmpty())
+                    allRegions else prov.regions
+                rSpin.adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item,
+                    if (regions.isEmpty()) listOf("") else regions)
+                ep.hint = prov.endpoints.joinToString(", ") { if (it.contains("\$region")) it.replace("\$region","...") else it }
+            }
+            override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
+        }
+
+        android.app.AlertDialog.Builder(ctx)
+            .setTitle("S3 对象存储")
+            .setView(col)
+            .setPositiveButton("保存") { _, _ ->
+                val pi = pSpin.selectedItemPosition
+                val prov = s3Providers[pi]
+                val s3n = prov.rcloneName
+                val region = rSpin.selectedItem.toString()
+                var endpoint = ep.text.toString().trim()
+                if (endpoint.isEmpty()) {
+                    endpoint = prov.endpoints.firstOrNull()?.replace("\$region", region) ?: ""
+                }
+                val ak = ek.text.toString().trim()
+                val ask = sk.text.toString().trim()
+                if (ak.isEmpty() || ask.isEmpty()) return@setPositiveButton
+                val sb = StringBuilder()
+                sb.appendLine("[$name]"); sb.appendLine("type = s3")
+                sb.appendLine("provider = $s3n"); sb.appendLine("access_key_id = $ak")
+                sb.appendLine("secret_access_key = $ask"); sb.appendLine("region = $region")
+                if (endpoint.isNotEmpty()) sb.appendLine("endpoint = $endpoint")
+                sb.appendLine("acl = private")
+                Thread {
+                    try {
+                        rcloneCfgFile.parentFile?.mkdirs()
+                        val existing = if (rcloneCfgFile.exists()) rcloneCfgFile.readText() + "\n" else ""
+                        rcloneCfgFile.writeText(existing + sb.toString())
+                        runOnUiThread { supportActionBar?.title = "设置 ✅ S3 已保存"; buildItems() }
+                    } catch (e: Exception) { runOnUiThread { supportActionBar?.title = "设置 ❌ ${e.message}" } }
+                }.start()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showWebdavDialog(name: String) {
+        val ctx = this
+        val col = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(40, 16, 40, 16)
+        }
+        // Vendor spinner
+        col.addView(android.widget.TextView(ctx).apply { text = "服务类型"; textSize = 13f })
+        val vendors = listOf("nextcloud","owncloud","sharepoint","fastmail","other")
+        val vSpin = android.widget.Spinner(ctx)
+        vSpin.adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, vendors)
+        col.addView(vSpin)
+        // URL
+        col.addView(android.widget.TextView(ctx).apply { text = "WebDAV 地址"; textSize = 13f })
+        val urlEt = android.widget.EditText(ctx).apply { hint = "https://example.com/remote.php/dav/files/user"; textSize = 14f; setSingleLine(); setPadding(0,4,0,8) }
+        col.addView(urlEt)
+        // User + Pass
+        col.addView(android.widget.TextView(ctx).apply { text = "用户名"; textSize = 13f })
+        val userEt = android.widget.EditText(ctx).apply { textSize = 14f; setSingleLine(); setPadding(0,4,0,8) }
+        col.addView(userEt)
+        col.addView(android.widget.TextView(ctx).apply { text = "密码"; textSize = 13f })
+        val passEt = android.widget.EditText(ctx).apply { textSize = 14f; setSingleLine(); setPadding(0,4,0,8) }
+        col.addView(passEt)
+
+        android.app.AlertDialog.Builder(ctx)
+            .setTitle("WebDAV")
+            .setView(col)
+            .setPositiveButton("保存") { _, _ ->
+                var url = urlEt.text.toString().trim()
+                val user = userEt.text.toString().trim()
+                val pass = passEt.text.toString().trim()
+                val vendor = vSpin.selectedItem.toString()
+                if (url.isEmpty() || user.isEmpty()) return@setPositiveButton
+                if (!url.startsWith("http")) url = "https://$url"
+                val obscured = try {
+                    val p = Runtime.getRuntime().exec(arrayOf(BackupHookLocal.binPath+"/rclone","obscure",pass))
+                    p.inputStream.bufferedReader().readText().trim()
+                } catch (_: Exception) { pass }
+                val sb = StringBuilder()
+                sb.appendLine("[$name]"); sb.appendLine("type = webdav")
+                sb.appendLine("url = $url"); sb.appendLine("vendor = $vendor")
+                sb.appendLine("user = $user"); sb.appendLine("pass = $obscured")
+                Thread {
+                    try {
+                        rcloneCfgFile.parentFile?.mkdirs()
+                        val existing = if (rcloneCfgFile.exists()) rcloneCfgFile.readText()+"\n" else ""
+                        rcloneCfgFile.writeText(existing+sb.toString())
+                        runOnUiThread { supportActionBar?.title = "设置 ✅ WebDAV 已保存"; buildItems() }
+                    } catch (e: Exception) { runOnUiThread { supportActionBar?.title = "设置 ❌ ${e.message}" } }
+                }.start()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 }
 
