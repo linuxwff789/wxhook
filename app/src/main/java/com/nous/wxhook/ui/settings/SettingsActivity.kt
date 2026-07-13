@@ -222,15 +222,14 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun showProviderInputDialog(name: String, provider: String) {
-        val fields: List<Pair<String, String>>
-        when (provider) {
-            "s3" -> fields = listOf(
+        val fields = when (provider) {
+            "s3" -> listOf(
                 "access_key_id" to "Access Key ID",
                 "secret_access_key" to "Secret Access Key",
                 "region" to "区域 (默认 cn-north-1)",
                 "endpoint" to "Endpoint"
             )
-            "webdav" -> fields = listOf(
+            "webdav" -> listOf(
                 "url" to "WebDAV 地址",
                 "user" to "用户名",
                 "pass" to "密码"
